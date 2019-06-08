@@ -1,1 +1,1182 @@
 /* Licensed under the Apache License, Version 2.0 (the "License") http://www.apache.org/licenses/LICENSE-2.0 */
+.video-scroll-container {
+	border: 1px solid #888888;
+	overflow: auto;
+	position: relative;
+	background-color: transparent;
+}
+
+
+.settings.ui-icon, .settings.om-icon {
+  background-image: url(images/user-cog.svg);
+}
+
+.room.sidebar .tab.om-icon.big.user {
+    background-image: url(images/users.svg);
+}
+
+.room.sidebar .tab.om-icon.big.file {
+  background-image: url(images/folders.svg);
+}
+
+.ui-button-icon.ui-icon.ui-icon-closethick {
+  background-image: url(images/close.svg);
+  background-position: 0;  
+}
+
+.big.om-icon.broken.recording.ui-draggable.ui-draggable-handle{
+  background-image: url(images/recording-error.svg) !important;
+}
+.big.om-icon.broken.file.doc.fileitem.ui-draggable.ui-draggable-handle {
+  background-image: url(images/file-error.svg) !important;
+}
+.big.om-icon.file.image.fileitem.ui-draggable.ui-draggable-handle {
+  background-image: url(images/file-image-solid.svg) !important;
+}
+.file.item .errors {
+  background-image: url(images/error.svg);
+  width: 16px;
+  height: 16px;
+  top: 5px;
+  right: -7px;
+}
+
+.file.tree .om-icon.big {
+    background-size: 16px;
+}
+
+button.ui-button.ui-corner-all.ui-widget:not(.ui-button-icon-only) {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+/* Videofenster zeigt Icon für Mikrofonstatus */
+
+.ui-dialog .footer .on {
+  background-image: url(images/microphone.svg);
+  background-repeat: no-repeat;
+  padding-left: 18px;
+  background-size: 14px 14px;
+  background-position: 0px 2px;
+  font-size: 12px;
+}
+
+.ui-dialog .footer .off {
+  background-image: url(images/microphone-slash.svg);
+  background-repeat: no-repeat;
+  padding-left: 18px;
+  background-size: 14px 14px;
+  background-position: 0px 2px;
+  font-size: 12px;  
+}
+
+
+.ui-button.ui-dialog-titlebar-close {
+  background-color: transparent;
+}
+
+.room.sidebar .user.list .user.current {
+    background-color: #ddd;
+}
+
+/* Farben raus */
+
+.ui-widget-header, .ui-corner-all, .ui-tabs {
+    /* background: none; */
+    border: none;
+    border-radius: 0;
+}
+
+.ui-widget.ui-widget-content {
+    background: white;
+    border-color: #e0e0e0;
+}
+
+.ui-widget-header {
+    background: #e7e7e7;
+}
+
+/* Typografie */
+
+body {
+    font-family: "Helvetica Neue",Helvetica,Arial,sans-serif;
+    font-size: 14px;
+    line-height: 1.42857;
+    color: #333;
+    background-color: #fff;
+}
+
+/* Tabs */
+
+.ui-tab {
+    border-radius: 0;
+}
+
+.ui-state-default a, .ui-state-default a:link, .ui-state-default a:visited, a.ui-button, a:link.ui-button, a:visited.ui-button, .ui-button {
+    color: #555;
+    text-decoration: none;
+}
+
+/* Inaktive Tabs */
+
+.ui-state-default, .ui-widget-content .ui-state-default, .ui-widget-header .ui-state-default, .ui-button, html .ui-button.ui-state-disabled:hover, html .ui-button.ui-state-disabled:active {
+    font-weight: normal;
+    color: #777;
+    border: #777;
+    background: #f8f8f8;
+}
+
+/* Aktives Tab */
+
+.ui-state-active, .ui-widget-content .ui-state-active, .ui-widget-header .ui-state-active, a.ui-button:active, .ui-button:active, .ui-button.ui-state-active:hover {
+    color: #777;
+    border: #777;
+    background: #e7e7e7;
+}
+
+.ui-state-active a, .ui-state-active a:link, .ui-state-active a:visited {
+    color: #777;
+    text-decoration: none;
+}
+
+.ui-tabs-tab.ui-corner-top.ui-state-default.ui-tab {
+    background-color: transparent;
+    border: 1px solid #c5c5c5;
+    border-bottom: none;
+}
+
+.wb-tabbar .ui-state-active, .ui-tabs-nav .ui-state-active {
+  background-color: white !important;
+}
+
+.wb-tabbar .ui-state-active a, .ui-tabs-nav .ui-state-active a {
+  color: #777;
+}
+
+.ui-tabs-tab.ui-corner-top.ui-state-default.ui-tab {
+    padding-bottom: 5px;
+}
+
+.ui-state-active .badge {
+    color: white;
+    background-color: #777;
+}
+
+/* Whiteboard */
+
+.wb-area .ui-tabs-panel .scroll-container .canvas-container {
+    box-shadow: none;
+    margin-top: 0;
+    border: none;
+}
+
+.wb-area .ui-tabs-panel .scroll-container .canvas-container {
+  margin: 0 !important;
+}
+
+/* Leichter Schatten des Whiteboards */
+.upper-canvas {
+  box-shadow: 1px 1px 10px rgba(0, 0, 0, 0.2);
+}
+
+/* Automatische Breite der Toolbox */
+
+.wb-tool-settings .tab.props {
+  width: auto !important;
+}
+
+/* Matheformeln */
+
+.latex-guide {
+  color: rgb(59, 95, 138);
+  text-decoration: underline;
+  font-size: 90%;
+  position: absolute;
+  left: 10px;
+  bottom: 20px;
+}
+
+/* Volume Slider */
+
+.volume .ui-slider-vertical {
+    margin-left: 10px;
+}
+
+/* Sidebar */
+
+.user.header {
+    margin: 3px 0;
+}
+
+/* Benutzer in TN-Liste Hover */
+
+.room.sidebar .user.list .user:hover {
+    /* min-height: 40px !important; */
+    background-size: 40px !important;
+}
+
+.room.sidebar .user.list .user:hover .user.name {
+    top: 0;
+    margin: 0;
+}
+
+.room.sidebar .user.list .user:hover .user.actions {
+  top: 0;
+  /* margin-left: 40px !important; */
+}
+
+.room .user.entry.ui-corner-all.ui-widget-content {
+      background-size: 40px !important;
+    }
+
+.room.sidebar #room-sidebar-tab-users .user.list .user:hover .user.name {
+  left: 44px;
+}    
+
+.room.sidebar #room-sidebar-tab-users .user.list .user:hover .user.actions {
+  margin-left: 44px;
+} 
+
+.room.sidebar .user.list .user:hover {
+    min-height: 40px;
+}
+
+/* TODO: Von Peter aus custom.css? */
+#contents .room.sidebar .user.list .user:hover .private-chat, #contents .ui-icon.align-right.clickable.private-chat {
+    right: 0 !important;
+    bottom: 0 !important;
+}
+
+/* Buttons */
+
+/* .ui-button, html .ui-button.ui-state-disabled:hover, html .ui-button.ui-state-disabled:active {
+
+color: #fff;
+background-color: #3b5f8a;
+border-color: #335378;
+
+text-align: center;
+vertical-align: middle;
+border: 1px solid transparent;
+white-space: nowrap;
+padding: 6px 12px;
+border-radius: 4px;
+}
+
+ .ui-button:hover, .ui-button:focus {
+  color: #fff;
+  background-color: #2c4666;
+  border-color: #21354d;
+} */
+
+/* Folienschatten */
+.ui-dialog {
+    -moz-box-shadow: 1px 1px 4px rgba(0, 0, 0, 0.2);
+    -webkit-box-shadow: 1px 1px 4px rgba(0, 0, 0, 0.2);
+    -ms-filter: "progid:DXImageTransform.Microsoft.Shadow(Strength=4, Direction=135, Color='#eeeeee')";
+    filter: progid:DXImageTransform.Microsoft.Shadow(Strength=4,Direction=135,Color='#eeeeee');
+    box-shadow: 1px 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.ui-draggable {
+    box-shadow: 1px 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Videofenster mit Ton nicht gelb */
+.ui-state-highlight, .ui-widget-content .ui-state-highlight {
+  border: none;
+  background: none;
+}
+
+/* Toolbar rechts */
+
+.room.wb.area .tools .om-icon.big {
+  background-position: center center !important;
+  background-size: contain !important;
+}
+
+.ui-widget-header.clickable.om-icon.big {
+    margin-top: 4px !important;
+    background-color: transparent;
+    margin-bottom: 4px !important;
+}
+
+/* Toolbar Ausklappanzeiger */
+
+.room.wb.area .tools.vertical .dropdown-toggle .caret {
+  bottom: -2px;
+  left: -2px;
+  border-left-color: #777;
+}
+
+/* Audio Activity Indicator */
+
+.audio-activity.ui-icon {
+    background-image: url(images/speaking.svg);
+}
+
+.room.sidebar .user.list .user .ui-icon.audio-activity {
+    bottom: 3px;
+}
+
+/* An (falsche) des Position Chatfensters anpassen */
+
+/* .room.wb.area.ui-droppable, .room.sidebar.ui-resizable {
+    top: 36px !important;
+} */
+
+/* Foliennavigation */
+
+.wb-area .wb-zoom, .wb-area .wb-zoom .btn-group button {
+    background-color: #3b5f8a;
+}
+
+.wb-area .wb-zoom {
+  padding: 3px;
+  color: white;
+}
+
+.wb-area .wb-zoom select, .wb-area .wb-zoom input {
+  color: #333;
+}
+
+.wb-area .wb-zoom button {
+  background-size: 16px;
+  padding: 1px;
+  background-position: center center;
+}
+  
+.wb-area .wb-zoom button.up {
+  background-image: url(images/arrow-up-white.svg);
+}
+
+.wb-area .wb-zoom button.down {
+  background-image: url(images/arrow-down-white.svg);
+}
+
+.wb-area .wb-zoom .ui-icon-gear {
+  background-image: url(images/cog-white.svg);
+  background-position: center center;  
+}
+
+.wb-area button.zoom-out .ui-icon, .wb-area button.zoom-in .ui-icon {
+  background-size: 16px;
+  padding: 1px;
+  background-position: center center;
+  width: 100%;
+  height: 24px;
+}  
+
+.wb-area button.zoom-out .ui-icon-minusthick {
+  background-image: url(images/search-minus.svg);  
+}
+
+.wb-area button.zoom-in .ui-icon-plusthick {
+  background-image: url(images/search-plus.svg);
+}
+
+.ui-icon.typing-activity.big.typing {
+  background-image: url(images/typing.gif);
+  background-position: center center;
+}
+
+/* Quickpoll */
+
+#quick-vote {
+    position: absolute;
+    right: 60px;
+    bottom: 15px;
+    padding: 10px 20px 20px 20px;
+    background-color: #e7e7e7;
+    box-shadow: 1px 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+#quick-vote .control > .badge {
+    bottom: -15px !important;
+}
+
+.room.box.interview #quick-vote {
+  padding: 10px 20px 20px 20px !important;
+}
+
+/* Einheitliche Ein- und Ausklapppfeilchen */
+
+.room.sidebar .icon-undock, .room.wb.area .om-icon.big.prev {
+    background-image: url(images/angle-left.svg);
+    background-size: contain !important;
+    height: 24px;
+}
+.room.sidebar .icon-undock{
+    top: 12px;
+}
+
+.room.sidebar .icon-dock {
+  background-image: url(images/angle-right.svg);
+  background-size: contain !important;
+  height: 24px;
+}
+.btn-dock.ui-button.ui-corner-all.ui-widget {
+    margin-top: -2px;
+    margin-right: -2px;
+    background: transparent;
+}
+.room.wb.area .om-icon.big.next {
+  background-image: url(images/angle-right.svg);
+  background-size: contain !important;
+  height: 24px;
+}
+.ui-icon.ui-icon-caret-1-e {
+  background-image: url(images/angle-right.svg) !important;
+  background-size: contain !important;
+  background-position: center center;
+}
+.ui-icon.ui-icon-caret-1-w {
+  background-image: url(images/angle-left.svg) !important;
+  background-size: contain !important;
+  background-position: center center;
+}
+
+/* Icons Christopher */
+
+/*Rechte und Rollen linke Sidebar*/
+.room.sidebar .user.header > span.ui-icon.right.camera.clickable {
+  background-image: url(images/video-request.svg);
+  background-size: contain !important;
+  width: 25px !important;
+}
+
+.activity.cam.ui-icon,
+.right.camera.ui-icon{
+	background-image: url(images/video-slash.svg);
+	background-size: contain !important;
+}
+.activity.cam.enabled.ui-icon,
+.right.camera.ui-icon.granted{
+	background-image: url(images/video.svg);
+	background-size: contain !important;
+}
+.ui-icon.right.audio.bumper.clickable {
+	background-image: url(images/microphone-request.svg);
+	background-size: contain !important;
+}
+.activity.mic.ui-icon,
+.right.audio.ui-icon{
+	background-image: url(images/microphone-slash.svg);
+	background-size: contain !important;
+}
+.activity.mic.enabled.ui-icon,
+.right.audio.ui-icon.granted{
+	background-image: url(images/microphone.svg);
+	background-size: contain !important;
+}
+.right.presenter.ui-icon {
+	background-image: url(images/presentation-request.svg);
+	background-size: contain !important;
+}
+.right.presenter.ui-icon.granted {
+	background-image: url(images/presentation.svg);
+	background-size: contain !important;
+}
+.right.wb.ui-icon {
+	background-image: url(images/chalkboard-request.svg);
+	background-size: contain !important;
+}
+.right.wb.ui-icon.granted {
+	background-image: url(images/chalkboard.svg);
+	background-size: contain !important;
+}
+.ui-icon.exclsv-audio.granted {
+  background-image: url(images/microphone-crown.svg) !important;
+  background-size: contain !important;
+  background-position: center bottom;
+}
+.ui-icon.exclsv-audio {
+  background-image: url(images/microphone-crown-request.svg) !important;
+  background-size: 24px !important;
+  background-position: center bottom;
+}
+.right.moderator.ui-icon{
+	background-image: url(images/user-mod-request.svg);
+	background-size: contain !important;
+}
+.right.moderator.ui-icon.granted,
+.ui-icon.status-mod {
+	background-image: url(images/user-mod.svg);
+	background-size:24px !important;
+	padding-left:6px;
+}
+.ui-icon.status-wb {
+	background-image: url(images/chalkboard.svg);
+	background-size: contain !important;
+}
+.ui-icon.status-user{
+	display: none;
+}
+.private-chat.ui-icon {
+	background-image: url(images/comment.svg);
+	background-size: contain !important;
+}
+.ui-icon.kick{
+	background-image: url(images/door-open-solid.svg);
+	background-size: contain !important;
+  background-position: center center !important;
+  margin-left: 12px;  
+}
+.ui-icon.screen-share.granted {
+    background-image: url(images/desktop-solid.svg) !important;
+    background-size: 19px !important;
+    background-position: center bottom;
+}
+.ui-icon.screen-share {
+    background-image: url(images/desktop-solid-request.svg) !important;
+    background-size: contain !important;
+    background-position: center bottom;
+}
+.ui-icon.remote-control.granted {
+    background-image: url(images/mouse-pointer.svg) !important;
+    background-size: contain !important;
+    background-position: center bottom;
+}
+.ui-icon.remote-control {
+    background-image: url(images/mouse-pointer-request.svg) !important;
+    background-size: contain !important;
+    background-position: center bottom;
+}
+/*Whiteboard Top*/
+.add.om-icon.big {
+  background-image: url(images/plus.svg);
+  background-size: 18px !important;
+}
+
+/*Whiteboard Tools Sidebar*/
+.room.wb.area .tools .om-icon.big.clear-all {
+	background-image: url(images/delete-workspace.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.clear-slide {
+	background-image: url(images/delete-single-workspace.svg);
+	
+}
+.room.wb.area .tools .om-icon.big.save {
+	background-image: url(images/save.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.undo {
+	background-image: url(images/undo_flat.svg);
+	margin-left:2px;
+	margin-right:2px;
+	/*background-size: contain !important;*/
+	width: 30px;
+}
+.room.wb.area .tools .om-icon.big.pointer {
+	background-image: url(images/mouse-pointer.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.apointer {
+	background-image: url(images/pointer.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.text {
+	background-image: url(images/font.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.textbox {
+	background-image: url(images/bigtextbox.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.paint {
+	background-image: url(images/paint-brush.svg);
+	background-size: contain !important;
+}
+/*.room.wb.area .tools .om-icon.big.line {
+	background-image: url(images/line.png);
+}*/
+.room.wb.area .tools .om-icon.big.uline {
+	background-image: url(images/highlighter.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.rect {
+	background-image: url(images/rectangle-landscape.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.line {
+  background-image: url(images/line.svg);
+  background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.ellipse {
+	background-image: url(images/circle.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.arrow {
+	background-image: url(images/arrow-alt-right.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.math {
+	background-image: url(images/square-root-alt.svg);
+	background-size: contain !important;
+}
+.room.wb.area .tools .om-icon.big.eraser {
+  background-image: url(images/eraser.svg);
+}
+
+.settings.om-icon {
+  background-image: url(images/tool_preferences.svg);
+	background-size: contain !important;
+}
+
+.settings.om-icon.disabled {
+  background-image: url(images/tool_preferences_disabled.svg);
+}
+
+/*Umfrage*/
+#quick-vote .control.pro {
+	background-image: url(images/check.svg);
+	background-size: contain !important;
+}
+#quick-vote .control.con {
+	background-image: url(images/times.svg);
+	background-size: contain !important;
+  background-position: center;
+}
+
+/*Screensharing*/
+.room.menu.right .icon.share {
+  background-image: url(images/desktop-solid.svg);
+}
+
+/*Ordner*/
+.refresh.om-icon {
+	background-image: url(images/undo.svg);
+	background-size: 18px !important;
+}
+.folder-create.om-icon {
+	background-image: url(images/folder-plus-solid.svg);
+	background-size: contain !important;
+}
+.my.file.om-icon {
+	background-image: url(images/lock-solid.svg);
+	background-size: contain !important;
+}
+.public.file.om-icon {
+	background-image: url(images/lock-open-solid.svg);
+	background-size: contain !important;
+}
+.trash.om-icon {
+	background-image: url(images/trash.svg);
+	background-size: contain !important;
+}
+.ui-state-hover.trash-toolbar-hover .trash.om-icon {
+ 	background-image:url(images/trash-open.svg);
+	background-size: contain !important;
+}
+.ui-state-hover.trash-toolbar-hover {
+        border: 0px;
+}
+.wml.file.om-icon, .wml.file.om-icon.doc, .doc.file.om-icon {
+	background-image: url(images/file-solid.svg);
+	background-size: contain !important;
+}
+.wml.file.om-icon.wml {
+	background-image: url(images/pencil-ruler-saved-workspaces.svg);
+	background-size: contain !important;
+}
+.big.om-icon.recording.recorditem.ui-draggable.ui-draggable-handle {
+	background-image: url(images/recording.svg);
+}
+
+
+
+/* Peter */
+
+/*CHAT*/
+
+/*hide "ALL" and "Room..."*/
+
+#chat #chatTabs.ui-tabs .ui-tabs-nav li:nth-child(1) {
+    display: none;
+}
+
+#chat #chatTabs.ui-tabs .ui-tabs-nav .ui-tabs-anchor {
+	font-size: small;
+}
+
+div.date-row{
+	font-size:13px !important;
+}
+
+#chat .messageArea .from {
+	font-style: italic;
+	font-size: smaller;
+	font-weight: normal;
+	float: right;
+	margin-right: 25px;
+}
+
+#chat .messageArea .time {
+	margin-right:0px;
+}
+
+.user-row {
+	background-position: right;
+}
+
+/*Chat Buttons*/
+
+ul.dropdown-menu.btns-only, ul.dropdown-menu.btns-only li {
+  max-width: 72px;
+  margin: 5px;
+}
+
+.btn-toolbar{
+    margin-right: 2px !important;
+	margin-left: 2px !important;
+	font-size: 0 !important;
+	display: inline-block !important;
+}
+
+.btn-toolbar > .btn-group{
+  margin-left: 0px !important;
+	margin-right: 0px !important;
+}
+
+#emoticons{
+	width: 32px !important; 
+	height: 20px !important; 
+}
+
+#chat #fontStyle .chat-tool-icon {
+  background-image: url(images/font.svg) !important;
+}
+
+#hyperlink.chat-tool-icon {
+  background-image: url(images/link.svg) !important;
+  width: 32px !important;  
+}
+
+.save.chat-tool-icon {
+  background-image: url(images/save.svg) !important;  
+	float: inherit !important;
+	margin-right: 0px !important;
+  margin-left: 0px !important;
+}
+
+.send-ctrl.chat-tool-icon {
+  background-image: url(images/key_ctrl.svg);
+}
+
+.save:text{
+	content:"" !important;
+}
+
+.delete{
+	float: inherit !important;
+	margin-left: 0px !important;
+	padding-right: 6px !important;
+	padding-left: 6px !important;
+	width: 32px !important;
+}
+
+.chat{ 
+  padding-right: 6px !important;
+  padding-left: 6px !important;
+}
+
+.list.chat-tool-icon {
+  background-image: url(images/cog.svg) !important;
+}
+
+.sound-mute.chat-tool-icon {
+  background-image: url(images/volume-mute.svg);
+	float: inherit !important;
+  margin-left: 0px !important;
+}
+
+.sound.chat-tool-icon {
+  background-image: url(images/volume-up-solid.svg);
+  float: inherit !important;
+  margin-left: 0px !important;
+}
+
+.css-emoticon.animated-emoticon.no-rotate.nintendo-controller{
+	display:none;
+}
+
+.send-btn.chat-tool-icon b {
+    font-size: 15px;
+    color: #777777;
+}
+
+.send-btn.chat-tool-icon.send-ctrl b {
+	padding-left:15px;
+}
+
+.send-ctrl.chat-tool-icon {
+	background-position: 10px 0;
+}
+
+/*chat input as much space as possible*/
+
+#chatTabs + form {
+	width:100% !important;
+    margin-right: 1px !important;
+}
+
+/*remove icon in chat*/
+div.from + div.icons { 
+        display:none !important;
+}
+
+/*remove change fontsize in chat*/
+#fontSize{
+        display:none !important;
+}
+
+span.from{
+	font-size:14px;
+}
+
+#chat .messageArea .user-row {
+    background-size: 20px, 20px !important;
+    padding-left: 22px !important;
+    min-height: 22px !important;
+}
+	/*WB*/
+
+/*wb control bottom left moveable of whiteboard*/
+div.wb-zoom{
+/*	 left:auto !important;
+	 right:62px;*/
+	 top:auto !important;
+	 bottom:1px;
+}
+
+/*TOOL BOX right top*/
+
+div.tools{
+	top:7px !important;
+	right:23px !important;
+	left:auto !important;
+	bottom:auto !important;
+}
+
+/*Anzahl WBs auf 6 begrenzen*/
+
+ul.scrollable.ui-tabs-nav.ui-helper-reset.ui-helper-clearfix.ui-sortable > li:nth-child(n+7){
+	display:none;
+}
+
+/*ACTION MENU*/
+
+/*hide "send invitation" */
+#menu > div > ul > li:nth-child(3) > ul > li:nth-child(1)[title~="---"]{
+        display:none !important;
+}
+
+/* Hide Desktop sharing for interview rooms */
+.interview #menu > div > ul > li:nth-child(3) > ul > li:nth-child(2),
+/* Hide drawing board request for interview rooms */
+.interview #menu > div > ul > li:nth-child(3) > ul > li:nth-child(4),
+/* Hide PNG-download request for interview rooms */
+.interview #menu > div > ul > li:nth-child(3) > ul > li:nth-child(7),
+/* Hide PDF-download request for interview rooms */
+.interview #menu > div > ul > li:nth-child(3) > ul > li:nth-child(8) {
+  display: none !important;
+}
+
+/*hide "sip dialer" */
+#menu > div > ul > li:nth-child(3) > ul > li:nth-child(6)[title~="---"]{
+        display:none !important;
+}
+
+/* videopod in front of all*/
+/*
+taucht noch mal auf
+.user-video{
+	z-index:99 !important;
+}*/
+
+
+
+a.ui-tabs-anchor{
+	line-hight: 0.7 !important;
+}
+
+/*Quick Poll*/
+#quick-vote > div.close.clickable{
+	text-align: center;
+}
+
+span.icon.ask.ui-button.ui-corner-all.ui-widget{
+	display:none;
+}
+
+/*"Dateiupload"*/
+.fileinput.fileinput-new{
+	border-color: #3b5f8a;;
+    border-style: solid;
+   }
+
+.btn.btn-file{
+	color:#362b36;
+}
+
+.ui-dialog-buttonset button{
+	color:#362b36;
+}
+
+.wupb-container+div label {
+	margin-left: 10px;
+}
+
+/*Icons Dateien Menü*/
+.big.om-icon.file.fileitem{
+	/*width: 20px !important;*/
+	height:20px !important;
+	box-shadow: unset;
+}
+.recorditem{
+	/*width: 20px !important;*/
+	height:20px !important;
+	background-size: unset !important;
+	box-shadow: unset;
+}
+.fileitem{
+	/*width: 20px !important;*/
+	height:20px !important;
+	background-size: unset !important;
+	box-shadow: unset;
+}
+.processingrecorditem{
+	width: 20px !important;
+	height:20px !important;
+	background-size: 20px 20px !important;
+	box-shadow: unset;
+}
+
+.om-icon.big.clickable.align-left{
+	width: 20px !important;
+	height:20px !important;
+}
+.om-icon.big.clickable.align-right{
+	width: 20px !important;
+	height:20px !important;
+}
+.btn-dock.ui-button.ui-corner-all.ui-widget.ui-button-icon-only.align-right{
+	border:none!important;
+}
+
+.my.file{
+	background: #ffffff;
+}
+
+/*User Anzahl zurechtrücken*/
+.room.sidebar .tab.om-icon.big > span.badge{
+	margin-left: 10px;
+	margin-bottom: 10px;
+	vertical-align: top;
+}
+
+.room.sidebar .tab.om-icon.big{
+	max-width:100px !important;
+	line-height: 25px
+}
+
+.room.sidebar .tab.om-icon.big > span{
+	max-width:90px !important;
+} 
+
+div.control > span.badge{
+    right: 10px !important;
+	bottom: -7px !important;
+}
+
+
+/*Symbole im Usermenu kleiner*/ 
+.room.sidebar .user.header > span{
+	width:20px !important;
+	height:20px !important;
+}
+
+/*einklappen user munu */
+.btn-dock.ui-button.ui-corner-all.ui-widget.ui-button-icon-only.align-right{
+	margin-top:-2px;
+	margin-right:-2px;
+
+}
+
+.room.sidebar{
+	min-width: 322px !important;
+}
+
+@media screen and (max-width: 1280px)
+.room.sidebar {
+    min-width: 322px !important;
+}
+
+/*Anfangsbreite user menu*/ 
+.room.sidebar.ui-resizable{
+	width:322px;
+}
+
+/*user name kleiner*/
+.user.name{
+	font-size:13px;
+}
+
+.room.sidebar .ui-tabs-nav .ui-tabs-tab{
+	height: 22px; 
+}
+
+.room.sidebar .tab.om-icon.big.user {
+    background-size: 22px !important;
+    margin-top: 5px;
+    
+}
+
+.room.sidebar .tab.om-icon.big .label {
+    margin-left: -10px !important;
+    line-height: 20px;
+    margin-top: 2px;
+}
+
+.room.sidebar .tab.om-icon.big.file {
+    background-size: 22px !important;
+}
+
+.room.sidebar .tab.om-icon.big .file { 
+    margin-left: -10px !important;
+}
+
+.tools .om-icon.big {
+    /*background-size: contain !important;*/
+    width: 24px;
+    height: 24px !important;
+}
+
+#wb-tab-2 > div.tools.ui-state-active.vertical.clear.ui-draggable.ui-draggable-handle > div.btn-group.cliparts > a > div {
+	background-size: contain !important;
+}
+
+.room.wb.area .tools .dropdown-menu .om-icon.big {
+		background-size: contain !important;
+}
+
+/*.wb-tabbar .add, .wb-tabbar .prev, .wb-tabbar .next {
+    top: 10px !important;
+}*/
+
+.file.item .name {
+    padding-top: 0px !important;
+}
+
+.ui-tabs .ui-tabs-nav li.ui-tabs-active {
+    /*padding-bottom: 6px !important;*/
+}
+
+#chatPanel.room {
+    right: 3px !important;
+    top: 31px !important;
+   
+}
+/*Videos links drüber rechts drunter*/
+.room.sidebar.ui-resizable{ 
+        z-index:97 !important;
+}
+
+.video.user-video{
+       z-index:98 !important;
+}
+
+#chatPanel{
+         z-index:99 !important;
+}
+
+.room.sidebar .user.list {
+    overflow-y: unset;
+}
+
+.room.sidebar .user.list .user:hover .user.actions .ui-icon {
+    margin-top: 2px;
+}
+
+.room.sidebar .user.list .user:hover .private-chat{
+	right: -10px !important;
+	bottom: -32px !important;
+}
+
+.user.entry.ui-corner-all.ui-widget-content:hover{
+        background-size: 90px !important;
+}
+
+
+.user.entry.ui-corner-all.ui-widget-content{
+	background-size: 45px !important;
+}
+
+/*pumpen original margin -1px*/
+.ui-menu-item-wrapper.ui-state-active {
+    margin: 0px;
+}
+
+.menu .exit{
+	display:none !important;
+}
+
+
+/*User Menu eingeklappt -> etwas kleiner*/
+.room.sidebar.closed{
+	left:-290px !important;
+}
+
+#room-sidebar-tabs{
+	padding:0px;
+}
+
+.wb-tabbar{
+ min-height:35px !important;
+ height:35px;
+}
+
+.scroll-container{
+	height:35px;
+}
+
+.room.sidebar.ui-resizable>.ui-resizable-handle{
+	height: 95vh !important;
+}
+
+.msg a {
+	color: #34a7a3 !important;
+}
+
+#chatPanel .label{
+	color: #555;
+}
+
+
+/*Sabine will nur ein Texttool*/
+.room.wb.area .tools .om-icon.big.textbox, .room.wb.area .tools .texts .caret {
+	display:none !important;
+}
+
+#wb-tab-2 > div.tools.ui-state-active.vertical.clear.ui-draggable.ui-draggable-handle > div.btn-group.texts > a > span {
+/*.ui-widget-header.clickable.om-icon big.text.stub .carat {*/
+	display: none;
+}
+/*.btn-group.texts.open */
+#wb-tab-2 > div.tools.ui-state-active.vertical.clear.ui-draggable.ui-draggable-handle > div.btn-group.texts > ul {
+		display: none;
+}
+#wb-tab-2 > div.tools.ui-state-active.vertical.clear.ui-draggable.ui-draggable-handle > div.btn-group.texts.open > a{
+	box-shadow: inset 0 0px 0px;
+}
+
+/* A&A Badge zurechtschieben*/
+#activities .ui-widget-header {
+	padding-top:1px;
+	height: 22px;
+}
+
+#activities .ui-widget-header .clickable.control.block.ui-widget-header.ui-state-active .badge{
+	padding: 1px 7px;
+}

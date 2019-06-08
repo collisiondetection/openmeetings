@@ -269,8 +269,12 @@ var Video = (function() {
 			area.append($('<div class="pod"></div>').attr('id', contId));
 			WbArea.updateAreaClass();
 		} else {
-			contSel = '.room.box';
+			// contSel = '.room.box';
+			// Video container set position
+	        contSel = '.video-scroll-container';
+			getVidContPos();
 		}
+	
 		$(contSel).append(OmUtil.tmpl('#user-video', _id)
 				.attr('title', name)
 				.attr('data-client-uid', sd.cuid)
@@ -278,6 +282,20 @@ var Video = (function() {
 				.data(self));
 		return contSel;
 	}
+	
+	function getVidContPos(){
+		cont = $(WB_AREA_SEL);
+		contSel = '.video-scroll-container';
+		chat = $('#chatPanel');
+		$(contSel).css({
+			'top':cont.height(),
+			'width':cont.width(),
+			'height':chat.height()-cont.height(),
+			'left': cont.offset().left
+		});
+		
+	}
+	
 	function _initDialog(v, opts) {
 		if (opts.interview) {
 			v.dialog('option', 'draggable', false);
