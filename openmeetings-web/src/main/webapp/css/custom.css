@@ -1085,6 +1085,8 @@ div.control > span.badge{
 
 .video.user-video{
        z-index:98 !important;
+       top:unset !important;
+       left:unset !important;
 }
 
 #chatPanel{
