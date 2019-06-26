@@ -1182,3 +1182,12 @@ div.control > span.badge{
 #activities .ui-widget-header .clickable.control.block.ui-widget-header.ui-state-active .badge{
 	padding: 1px 7px;
 }
+
+
+/* move controls to righ side volume control css */
+.dropdown-menu.video.volume {
+	position:absolute !important;
+	top:0px;
+	left:15px;
+}
+}

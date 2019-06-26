@@ -67,7 +67,7 @@
       if (!$(".dialog-extend-css").length) {
         style = '';
         style += '<style class="dialog-extend-css" type="text/css">';
-        style += '.ui-dialog .ui-dialog-titlebar-buttonpane>a { float: right; }';
+        //style += '.ui-dialog .ui-dialog-titlebar-buttonpane>a { float: right; }';
         style += '.ui-dialog .ui-dialog-titlebar-restore { width: 19px; height: 18px; }';
         style += '.ui-dialog .ui-dialog-titlebar-restore span { display: block; margin: 1px; }';
         style += '.ui-dialog .ui-dialog-titlebar-restore:hover,';
@@ -90,8 +90,8 @@
       buttonPane = $('<div class="ui-dialog-titlebar-buttonpane"></div>').appendTo(titlebar);
       buttonPane.css({
         "position": "absolute",
-        "top": "50%",
-        "right": "0.3em",
+        "top": "30%",
+        "left": "10.2em",
         "margin-top": "-10px",
         "height": "18px"
       });
