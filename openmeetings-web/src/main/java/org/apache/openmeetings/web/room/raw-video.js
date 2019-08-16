@@ -4,7 +4,7 @@ var Video = (function() {
 		, AudioCtx = window.AudioContext || window.webkitAudioContext;
 	let sd, v, vc, t, f, size, vol, slider, handle, video, rtcPeer
 		, lastVolume = 50, muted = false, aCtx, aSrc, aDest, gainNode, analyser
-		, lm, level, userSpeaks = false, muteOthers;
+		, lm, level, userSpeaks = false, muteOthers, vidLeft=200,moderatorVidPos=false,vidCount=0;
 
 	function _getExtra() {
 		return t.height() + 2 + (f.is(':visible') ? f.height() : 0);
@@ -287,8 +287,9 @@ var Video = (function() {
 		cont = $(WB_AREA_SEL);
 		contSel = '.video-scroll-container';
 		chat = $('#chatPanel');
+		
 		$(contSel).css({
-			'top':cont.height(),
+			'top':cont.height()+25,
 			'width':cont.width(),
 			'height':chat.height()-cont.height(),
 			'left': cont.offset().left
@@ -380,6 +381,9 @@ var Video = (function() {
 	}
 	function _init(msg) {
 		sd = msg.stream;
+		vidCount = vidCount+1;
+		sd.width = 160;
+		sd.height = 110;
 		sd.activities = sd.activities.sort();
 		size = {width: sd.width, height: sd.height};
 		const _id = VideoUtil.getVid(sd.uid)
@@ -391,6 +395,10 @@ var Video = (function() {
 			, opts = Room.getOptions();
 		sd.self = sd.cuid === opts.uid;
 		const contSel = _initContainer(_id, name, opts);
+		if(sd.user.rights && !moderatorVidPos){
+			moderatorVidPos= true;
+			vidLeft = 0;
+		}
 		v = $('#' + _id);
 		f = v.find('.footer');
 		if (!sd.self && isSharing) {
@@ -398,7 +406,7 @@ var Video = (function() {
 		}
 		if (sd.self && (isSharing || isRecording)) {
 			v.hide();
-		} else {
+		} else {			
 			v.dialog({
 				classes: {
 					'ui-dialog': 'ui-corner-all video user-video' + (opts.showMicStatus ? ' mic-status' : '')
@@ -409,9 +417,9 @@ var Video = (function() {
 				, minHeight: 50
 				, autoOpen: true
 				, modal: false
-				, appendTo: contSel
+				, appendTo: contSel				
 			});
-			_initDialog(v, opts);
+			_initDialog(v, opts);			
 		}
 		if (!isSharing && !isRecording) {
 			_initCamDialog();
@@ -419,14 +427,15 @@ var Video = (function() {
 		t = v.parent().find('.ui-dialog-titlebar').attr('title', name);
 		v.on('remove', _cleanup);
 		vc = v.find('.video');
-		vc.width(_w).height(_h);
+		vc.width(_w).height(_h);		
 		muteOthers = vc.find('.mute-others');
-
 		_refresh(msg);
 
 		if (!isSharing && !isRecording) {
 			VideoUtil.setPos(v, VideoUtil.getPos(VideoUtil.getRects(VID_SEL), sd.width, sd.height + 25));
 		}
+		v.parent().css('left',vidLeft+'px');
+		vidLeft = vidCount*200;
 		return v;
 	}
 	function _update(_c) {

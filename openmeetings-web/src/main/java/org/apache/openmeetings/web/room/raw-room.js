@@ -140,7 +140,7 @@ var Room = (function() {
 		$('.video-scroll-container').css({
 			width: w,
 			left: (Settings.isRtl ? chW : sbW )+ 'px',
-			top: cont.height()
+			top: cont.height()+25
 		});
 	}
 	function _reload() {

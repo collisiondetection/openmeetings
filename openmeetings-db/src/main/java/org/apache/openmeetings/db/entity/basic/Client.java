@@ -329,7 +329,7 @@ public class Client implements IDataProviderEntity, IWsClient {
 
 	public Long getRoomId() {
 		return room == null ? null : room.getId();
-	}
+	}	
 
 	private JSONObject addUserJson(JSONObject o) {
 		JSONObject u = new JSONObject();
@@ -340,7 +340,8 @@ public class Client implements IDataProviderEntity, IWsClient {
 				.put("lastName", user.getLastname())
 				.put("displayName", user.getDisplayName())
 				.put("address", a)
-				.put("pictureUri", pictureUri);
+				.put("pictureUri", pictureUri)
+				.put("rights", hasRight(Right.moderator));			
 			if (user.getAddress() != null) {
 				if (Strings.isEmpty(user.getFirstname()) && Strings.isEmpty(user.getLastname())) {
 					a.put("email", user.getAddress().getEmail());

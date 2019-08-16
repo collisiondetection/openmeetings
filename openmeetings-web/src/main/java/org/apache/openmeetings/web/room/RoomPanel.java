@@ -29,7 +29,9 @@ import static org.apache.wicket.util.time.Duration.NONE;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -50,6 +52,7 @@ import org.apache.openmeetings.db.entity.room.Room;
 import org.apache.openmeetings.db.entity.room.Room.Right;
 import org.apache.openmeetings.db.entity.room.Room.RoomElement;
 import org.apache.openmeetings.db.entity.room.RoomGroup;
+import org.apache.openmeetings.db.entity.room.RoomModerator;
 import org.apache.openmeetings.db.entity.server.SOAPLogin;
 import org.apache.openmeetings.db.entity.user.GroupUser;
 import org.apache.openmeetings.db.entity.user.User;
@@ -171,7 +174,7 @@ public class RoomPanel extends BasePanel {
 		private void initVideos(AjaxRequestTarget target) {
 			StringBuilder sb = new StringBuilder();
 			JSONArray streams = new JSONArray();
-			for (Client c: cm.listByRoom(getRoom().getId())) {
+			for (Client c: cm.listByRoom(getRoom().getId())) {																		
 				for (StreamDesc sd : c.getStreams()) {
 					streams.put(sd.toJson());
 				}

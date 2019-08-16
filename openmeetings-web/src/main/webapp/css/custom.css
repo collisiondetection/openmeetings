@@ -2,7 +2,7 @@
 .video-scroll-container {
 	border: 1px solid #888888;
 	overflow: auto;
-	position: relative;
+	position: absolute;
 	background-color: transparent;
 }
 
@@ -50,7 +50,7 @@ button.ui-button.ui-corner-all.ui-widget:not(.ui-button-icon-only) {
     border-radius: 4px;
 }
 
-/* Videofenster zeigt Icon für Mikrofonstatus */
+/* Videofenster zeigt Icon fï¿½r Mikrofonstatus */
 
 .ui-dialog .footer .on {
   background-image: url(images/microphone.svg);
@@ -928,7 +928,7 @@ span.icon.ask.ui-button.ui-corner-all.ui-widget{
 	margin-left: 10px;
 }
 
-/*Icons Dateien Menü*/
+/*Icons Dateien Menï¿½*/
 .big.om-icon.file.fileitem{
 	/*width: 20px !important;*/
 	height:20px !important;
@@ -969,7 +969,7 @@ span.icon.ask.ui-button.ui-corner-all.ui-widget{
 	background: #ffffff;
 }
 
-/*User Anzahl zurechtrücken*/
+/*User Anzahl zurechtrï¿½cken*/
 .room.sidebar .tab.om-icon.big > span.badge{
 	margin-left: 10px;
 	margin-bottom: 10px;
@@ -1078,15 +1078,14 @@ div.control > span.badge{
     top: 31px !important;
    
 }
-/*Videos links drüber rechts drunter*/
+/*Videos links drï¿½ber rechts drunter*/
 .room.sidebar.ui-resizable{ 
         z-index:97 !important;
 }
 
 .video.user-video{
        z-index:98 !important;
-       top:unset !important;
-       left:unset !important;
+       top:unset !important;           
 }
 
 #chatPanel{
@@ -1190,4 +1189,8 @@ div.control > span.badge{
 	top:0px;
 	left:15px;
 }
+
+.ui-dialog-content.ui-widget-content.ui-dialog-normal {
+  max-width: 160px !important; 
+  max-height: 110px !important;
 }
