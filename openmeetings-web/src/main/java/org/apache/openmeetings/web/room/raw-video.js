@@ -1,10 +1,11 @@
 /* Licensed under the Apache License, Version 2.0 (the "License") http://www.apache.org/licenses/LICENSE-2.0 */
+vidCount=0, vidLeft=200;
 var Video = (function() {
 	const self = {}
 		, AudioCtx = window.AudioContext || window.webkitAudioContext;
 	let sd, v, vc, t, f, size, vol, slider, handle, video, rtcPeer
 		, lastVolume = 50, muted = false, aCtx, aSrc, aDest, gainNode, analyser
-		, lm, level, userSpeaks = false, muteOthers, vidLeft=200,moderatorVidPos=false,vidCount=0;
+		, lm, level, userSpeaks = false, muteOthers ,moderatorVidPos=false;
 
 	function _getExtra() {
 		return t.height() + 2 + (f.is(':visible') ? f.height() : 0);
