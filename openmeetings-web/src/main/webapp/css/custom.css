@@ -1,1 +1,14 @@
 /* Licensed under the Apache License, Version 2.0 (the "License") http://www.apache.org/licenses/LICENSE-2.0 */
+.room-block .video-block {
+    position: absolute;
+    height: var(--room-video-height);
+	width: calc(100% - var(--room-sidebar-width) - var(--chat-width) - 2 * var(--buffer-size));
+	top: calc(var(--room-menu-height) + var(--room-wb-height));
+	left: calc(var(--room-sidebar-width) + var(--buffer-size));
+	border: 1px solid #888888;		
+	background-color: transparent;
+}
+
+.video-block .video.user-video{
+	top: 0px !important;	
+}

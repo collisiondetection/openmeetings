@@ -4,7 +4,7 @@ var Video = (function() {
 		, AudioCtx = window.AudioContext || window.webkitAudioContext;
 	let sd, v, vc, t, f, size, vol, slider, handle, video, iceServers
 		, lastVolume = 50, muted = false
-		, lm, level, userSpeaks = false, muteOthers;
+		, lm, level, userSpeaks = false, muteOthers,vidLeft=200,moderatorVidPos=false,vidCount=0;;
 
 	function _resizeDlgArea(_w, _h) {
 		if (Room.getOptions().interview) {
@@ -251,7 +251,7 @@ var Video = (function() {
 			area.append($('<div class="pod"></div>').attr('id', contId));
 			WbArea.updateAreaClass();
 		} else {
-			contSel = '.room-block .container';
+			contSel = '.room-block .container .video-block';
 		}
 		$(contSel).append(OmUtil.tmpl('#user-video', _id)
 				.attr('title', name)
@@ -341,6 +341,9 @@ var Video = (function() {
 		sd = msg.stream;
 		iceServers = msg.iceServers;
 		sd.activities = sd.activities.sort();
+		vidCount = vidCount+1;
+		sd.width = 160;
+		sd.height = 145;
 		size = {width: sd.width, height: sd.height};
 		const _id = VideoUtil.getVid(sd.uid)
 			, name = sd.user.displayName
@@ -351,6 +354,10 @@ var Video = (function() {
 			, opts = Room.getOptions();
 		sd.self = sd.cuid === opts.uid;
 		const contSel = _initContainer(_id, name, opts);
+		if(sd.user.rights && !moderatorVidPos){
+			moderatorVidPos= true;
+			vidLeft = 0;
+		}
 		v = $('#' + _id);
 		f = v.find('.footer');
 		if (!sd.self && isSharing) {
@@ -387,6 +394,8 @@ var Video = (function() {
 		if (!isSharing && !isRecording) {
 			VideoUtil.setPos(v, VideoUtil.getPos(VideoUtil.getRects(VID_SEL), sd.width, sd.height + 25));
 		}
+		v.parent().css('left',vidLeft+'px');
+		vidLeft = vidCount*200;
 		return v;
 	}
 	function _update(_c) {

@@ -51,6 +51,8 @@ body.no-menu {
 	--activities-height: 20px;
 	--vdialog-titlebar-height: 27px;
 	--vdialog-footer-height: 0px;
+	--room-video-height: 150px;
+	--room-wb-height: calc(100% - var(--room-menu-height) - var(--room-video-height));
 }
 .main.room.interview {
 	--rec-btn-height: 40px;
