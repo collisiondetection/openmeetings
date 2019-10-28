@@ -10,5 +10,7 @@
 }
 
 .video-block .video.user-video{
-	top: 0px !important;	
+	top: 0px !important;
+	width: 160px !important;
+	height: 150px !important;	
 }
