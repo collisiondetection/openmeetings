@@ -90,8 +90,8 @@
       buttonPane = $('<div class="ui-dialog-titlebar-buttonpane"></div>').appendTo(titlebar);
       buttonPane.css({
         "position": "absolute",
-        "top": "50%",
-        "right": "0.3em",
+        "top": "30%",
+        "left": "10.2em",
         "margin-top": "-10px",
         "height": "18px"
       });

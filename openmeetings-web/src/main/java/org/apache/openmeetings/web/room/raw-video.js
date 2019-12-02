@@ -392,9 +392,8 @@ var Video = (function() {
 		_refresh(msg);
 
 		if (!isSharing && !isRecording) {
-			VideoUtil.setPos(v, VideoUtil.getPos(VideoUtil.getRects(VID_SEL), sd.width, sd.height + 25));
-		}
-		v.parent().css('left',vidLeft+'px');
+			VideoUtil.setPos(v, {left:vidLeft,top:0});
+		}		
 		vidLeft = vidCount*200;
 		return v;
 	}

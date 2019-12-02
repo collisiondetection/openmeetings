@@ -245,8 +245,8 @@ html[dir="rtl"] .room-block .sidebar {
 	border-radius: 0;
 	border: 0;
 	box-shadow: initial;
-	left: 70px;
-	top: -50px;
+	left: 22px;
+	top: 0px;
 	background-color: transparent;
 }
 #video-settings {
@@ -412,12 +412,12 @@ ul.settings-menu {
 .room-block .container .user-video .header .ui-dialog-title {
 	padding-left: 5px;
 }
-.room-block .container .user-video .video {
+/* .room-block .container .user-video .video {
 	min-width: 40px;
 	min-height: 30px;
 	overflow: hidden;
 	position: relative;
-}
+} */
 .room-block .container .user-video .video.audio-only {
 	background-repeat: no-repeat;
 	background-size: auto 100%;
