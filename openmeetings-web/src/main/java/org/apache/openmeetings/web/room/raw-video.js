@@ -1,17 +1,18 @@
 /* Licensed under the Apache License, Version 2.0 (the "License") http://www.apache.org/licenses/LICENSE-2.0 */
+vidLeft=200,vidCount=0;
 var Video = (function() {
 	const self = {}
 		, AudioCtx = window.AudioContext || window.webkitAudioContext;
 	let sd, v, vc, t, f, size, vol, slider, handle, video, iceServers
 		, lastVolume = 50, muted = false
-		, lm, level, userSpeaks = false, muteOthers,vidLeft=200,moderatorVidPos=false,vidCount=0;;
+		, lm, level, userSpeaks = false, muteOthers,moderatorVidPos=false;
 
 	function _resizeDlgArea(_w, _h) {
 		if (Room.getOptions().interview) {
 			VideoUtil.setPos(v, VideoUtil.getPos());
-		} else if (v.dialog('instance')) {
-			v.dialog('option', 'width', _w).dialog('option', 'height', _h);
-		}
+		}// else if (v.dialog('instance')) {
+			//v.dialog('option', 'width', _w).dialog('option', 'height', _h);
+		//}
 	}
 	function _micActivity(speaks) {
 		if (speaks !== userSpeaks) {
@@ -271,8 +272,8 @@ var Video = (function() {
 			});
 			$('.pod-area').sortable('refresh');
 		} else {
-			v.dialog('option', 'draggable', true);
-			v.dialog('option', 'resizable', true);
+			v.dialog('option', 'draggable', false);
+			v.dialog('option', 'resizable', false);
 			if (VideoUtil.isSharing(sd)) {
 				v.on('dialogclose', function() {
 					VideoManager.close(sd.uid, true);
