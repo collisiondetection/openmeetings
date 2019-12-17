@@ -586,14 +586,14 @@ public class RoomPanel extends BasePanel {
 		super.onBeforeRender();
 		if (room.isVisible()) {
 			//We are setting initial rights here
-			Client c = getClient();
+			Client c = getClient();			
 			final int count = cm.addToRoom(c.setRoom(getRoom()));
 			SOAPLogin soap = WebSession.get().getSoapLogin();
 			if (soap != null && soap.isModerator()) {
 				c.allow(Right.superModerator);
 				cm.update(c);
 			} else {
-				Set<Right> rr = AuthLevelUtil.getRoomRight(c.getUser(), r, r.isAppointment() ? apptDao.getByRoom(r.getId()) : null, count);
+				Set<Right> rr = AuthLevelUtil.getRoomRight(c.getUser(), r, r.isAppointment() ? apptDao.getByRoom(r.getId()) : null, count);				
 				if (!rr.isEmpty()) {
 					c.allow(rr);
 					cm.update(c);

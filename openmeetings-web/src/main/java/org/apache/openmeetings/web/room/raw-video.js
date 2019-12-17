@@ -341,8 +341,7 @@ var Video = (function() {
 	function _init(msg) {
 		sd = msg.stream;
 		iceServers = msg.iceServers;
-		sd.activities = sd.activities.sort();
-		vidCount = vidCount+1;
+		sd.activities = sd.activities.sort();		
 		sd.width = 160;
 		sd.height = 145;
 		size = {width: sd.width, height: sd.height};
@@ -356,9 +355,8 @@ var Video = (function() {
 		sd.self = sd.cuid === opts.uid;
 		const contSel = _initContainer(_id, name, opts);
 		if(sd.user.rights && !moderatorVidPos){
-			moderatorVidPos= true;
-			vidLeft = 0;
-		}
+			moderatorVidPos= true;			
+		}		
 		v = $('#' + _id);
 		f = v.find('.footer');
 		if (!sd.self && isSharing) {
@@ -391,11 +389,17 @@ var Video = (function() {
 		muteOthers = vc.find('.mute-others');
 
 		_refresh(msg);
-
+		if(moderatorVidPos){
+			vidLeft = 0;
+		}else{
+			vidCount = vidCount+1;
+			vidLeft = vidCount*200;
+		}
 		if (!isSharing && !isRecording) {
 			VideoUtil.setPos(v, {left:vidLeft,top:0});
-		}		
-		vidLeft = vidCount*200;
+		}	
+		
+		
 		return v;
 	}
 	function _update(_c) {

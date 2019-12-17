@@ -58,10 +58,10 @@ public class AuthLevelUtil {
 			result.add(Room.Right.superModerator);
 		}
 		if (result.isEmpty()) {
-			if (!r.isModerated() && 1 == userCount) {
-				//room is not moderated, first user is moderator!
-				result.add(Room.Right.moderator);
-			}
+			// if (!r.isModerated() && 1 == userCount) {
+			// 	//room is not moderated, first user is moderator!
+			// 	result.add(Room.Right.moderator);
+			// }
 			//performing loop here to set possible 'superModerator' right
 			for (RoomModerator rm : r.getModerators()) {
 				if (u.getId().equals(rm.getUser().getId())) {
