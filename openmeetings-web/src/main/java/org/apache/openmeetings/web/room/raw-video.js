@@ -1,5 +1,4 @@
 /* Licensed under the Apache License, Version 2.0 (the "License") http://www.apache.org/licenses/LICENSE-2.0 */
-vidLeft=200,vidCount=0;
 var Video = (function() {
 	const self = {}
 		, AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -10,9 +9,9 @@ var Video = (function() {
 	function _resizeDlgArea(_w, _h) {
 		if (Room.getOptions().interview) {
 			VideoUtil.setPos(v, VideoUtil.getPos());
-		}// else if (v.dialog('instance')) {
-			//v.dialog('option', 'width', _w).dialog('option', 'height', _h);
-		//}
+		} else if (v.dialog('instance')) {
+			v.dialog('option', 'width', _w).dialog('option','height', _h);
+		}
 	}
 	function _micActivity(speaks) {
 		if (speaks !== userSpeaks) {
@@ -338,7 +337,7 @@ var Video = (function() {
 		});
 		vol.hide();
 	}
-	function _init(msg) {
+	function _init(msg,count) {
 		sd = msg.stream;
 		iceServers = msg.iceServers;
 		sd.activities = sd.activities.sort();		
@@ -367,8 +366,8 @@ var Video = (function() {
 		} else {
 			v.dialog({
 				classes: {
-					'ui-dialog': 'ui-corner-all video user-video' + (opts.showMicStatus ? ' mic-status' : '')
-					, 'ui-dialog-titlebar': 'ui-corner-all' + (opts.showMicStatus ? ' ui-state-highlight' : '')
+					'ui-dialog': 'ui-corner-all video user-video' + (opts.showMicStatus ? ' mic-status' : '') + (sd.user.rights ? ' ui-dialog-admin' : '')
+					, 'ui-dialog-titlebar': 'ui-corner-all' + (opts.showMicStatus ? ' ui-state-highlight' : '')					
 				}
 				, width: _w
 				, minWidth: 40
@@ -376,6 +375,7 @@ var Video = (function() {
 				, autoOpen: true
 				, modal: false
 				, appendTo: contSel
+				, hasRights: sd.user.rights
 			});
 			_initDialog(v, opts);
 		}
@@ -391,15 +391,14 @@ var Video = (function() {
 		_refresh(msg);
 		if(moderatorVidPos){
 			vidLeft = 0;
-		}else{
-			vidCount = vidCount+1;
-			vidLeft = vidCount*200;
+		}else{			
+			vidLeft = count*200;
 		}
 		if (!isSharing && !isRecording) {
-			VideoUtil.setPos(v, {left:vidLeft,top:0});
+			//VideoUtil.setPos(v, VideoUtil.getPos(VideoUtil.getRects(VID_SEL), sd.width, sd.height + 25));
+			VideoUtil.setPos(v,{left:vidLeft,top:0});
 		}	
-		
-		
+				
 		return v;
 	}
 	function _update(_c) {
@@ -417,8 +416,8 @@ var Video = (function() {
 	function __createVideo() {
 		const _id = VideoUtil.getVid(sd.uid);
 		const hasVideo = VideoUtil.hasVideo(sd) || VideoUtil.isSharing(sd) || VideoUtil.isRecording(sd);
-		_resizeDlgArea(hasVideo ? size.width : 120
-			, hasVideo ? size.height : 90);
+		// _resizeDlgArea(hasVideo ? size.width : 120
+		// 	, hasVideo ? size.height : 90);
 		video = $(hasVideo ? '<video>' : '<audio>').attr('id', 'vid' + _id)
 			.width(vc.width()).height(vc.height())
 			.prop('autoplay', true).prop('controls', false);

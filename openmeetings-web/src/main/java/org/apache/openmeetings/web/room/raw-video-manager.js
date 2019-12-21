@@ -49,10 +49,10 @@ var VideoManager = (function() {
 		Sharer.setShareState(VideoUtil.isSharing(sd) ? SHARE_STARTED : SHARE_STOPED);
 		Sharer.setRecState(VideoUtil.isRecording(sd) ? SHARE_STARTED : SHARE_STOPED);
 	}
-	function _onReceive(msg) {
+	function _onReceive(msg,count) {
 		const uid = msg.stream.uid;
 		$('#' + VideoUtil.getVid(uid)).remove();
-		Video().init(msg);
+		Video().init(msg,count);
 		OmUtil.log(uid + ' receiving video');
 	}
 	function _onKMessage(m) {
@@ -63,10 +63,10 @@ var VideoManager = (function() {
 				});
 				if (share.data('cuid') === m.uid) {
 					share.off('click').hide();
-				}
+				}				
 				break;
 			case 'broadcastStopped':
-				_close(m.uid, false);
+				_close(m.uid, false);				
 				break;
 			case 'broadcast':
 				_onBroadcast(m);
@@ -189,7 +189,8 @@ var VideoManager = (function() {
 		if (!inited) {
 			return;
 		}
-		streams.forEach(function(sd) {
+		streams.forEach(function(sd,i) {
+			var count = 1;
 			const m = {stream: sd, iceServers: iceServers};
 			if (VideoUtil.isSharing(sd)) {
 				VideoUtil.highlight(share
@@ -206,7 +207,12 @@ var VideoManager = (function() {
 			} else if (VideoUtil.isRecording(sd)) {
 				return;
 			} else {
-				_onReceive(m);
+				if(sd.user.rights){
+					_onReceive(m);
+				}else{
+					_onReceive(m,count++);
+				}			
+				
 			}
 		});
 	}

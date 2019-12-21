@@ -32,8 +32,8 @@ var VideoUtil = (function() {
 		}
 		return list;
 	}
-	function _getRect(e) {
-		const win = $(e), winoff = win.offset();
+	function _getRect(e) {		
+		const win = $(e), winoff = win.offset();		
 		return {left: winoff.left
 			, top: winoff.top
 			, right: winoff.left + win.width()
