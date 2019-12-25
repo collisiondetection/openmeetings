@@ -33,7 +33,12 @@ var VideoManager = (function() {
 			});
 		}
 		$('#' + VideoUtil.getVid(uid)).remove();
-		Video().init(msg);
+		if(sd.user.rights){
+			Video().init(msg); // Set position as 0 for admin
+		}else{
+			Video().init(msg,1); // Set position as 1 for same user
+		}
+		
 		OmUtil.log(uid + ' registered in room');
 	}
 	function _onShareUpdated(msg) {
@@ -189,8 +194,17 @@ var VideoManager = (function() {
 		if (!inited) {
 			return;
 		}
-		streams.forEach(function(sd,i) {
-			var count = 1;
+		var hasAdmin = false;
+		streams.forEach(function(sd){
+			if(sd.user.rights){
+				hasAdmin = true;
+			}
+		});
+		var count = 1;
+		if(hasAdmin){
+			count = 2; 
+		}
+		streams.forEach(function(sd,i) {						
 			const m = {stream: sd, iceServers: iceServers};
 			if (VideoUtil.isSharing(sd)) {
 				VideoUtil.highlight(share
