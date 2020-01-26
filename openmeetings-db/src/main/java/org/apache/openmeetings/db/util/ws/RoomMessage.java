@@ -55,6 +55,7 @@ public class RoomMessage implements IWebSocketPushMessage {
 		, quickPollUpdated
 		, kurentoStatus
 		, wbReload
+		, rateStudent		
 	}
 	private final Date timestamp;
 	private final String uid;
@@ -112,7 +113,10 @@ public class RoomMessage implements IWebSocketPushMessage {
 	public String toString() {
 		return new StringBuilder().append("RoomMessage [roomId=").append(roomId)
 				.append(", userId=").append(userId)
-				.append(", type=").append(type).append("]")
+				.append(", type=").append(type)				
+				.append(", name=").append(name)
+				.append(", uid=").append(uid)
+				.append("]")
 				.toString();
 	}
 }

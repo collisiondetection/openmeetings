@@ -390,6 +390,7 @@ ul.settings-menu {
 .ui-dialog.video .ui-dialog-titlebar-collapse span
 , .ui-dialog.video .ui-dialog-titlebar-volume span
 , .ui-dialog.video .ui-dialog-titlebar-refresh span
+, .ui-dialog.video .ui-dialog-titlebar-rating span
 {
 	display: block;
 	margin: 1px;

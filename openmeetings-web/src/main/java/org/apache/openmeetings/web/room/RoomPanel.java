@@ -119,6 +119,7 @@ public class RoomPanel extends BasePanel {
 		, muteOthers
 		, mute
 		, toggleRight
+		, rateStudent
 	}
 	private final Room r;
 	private final boolean interview;
@@ -143,6 +144,7 @@ public class RoomPanel extends BasePanel {
 					.put("interview", interview)
 					.put("audioOnly", r.isAudioOnly())
 					.put("questions", r.isAllowUserQuestions())
+					.put("user", _c.toJson(true).get("user"))
 					.put("showMicStatus", !r.getHiddenElements().contains(RoomElement.MicrophoneStatus));
 			if (!Strings.isEmpty(r.getRedirectURL()) && (ws.getSoapLogin() != null || ws.getInvitation() != null)) {
 				options.put("reloadUrl", r.getRedirectURL());
@@ -454,7 +456,6 @@ public class RoomPanel extends BasePanel {
 							handler.appendJavaScript(String.format("VideoManager.update(%s);"
 									, c.toJson(self).toString(new NullStringer())));
 							sidebar.update(handler);
-							menu.update(handler);
 							wb.update(handler);
 							updateInterviewRecordingButtons(handler);
 						}
@@ -553,8 +554,15 @@ public class RoomPanel extends BasePanel {
 							wb.reloadWb(handler);
 						}
 						break;
+					case rateStudent:						
+						String uid = ((TextRoomMessage)m).getText();
+						Client c = cm.get(uid);
+						if(c!=null) {
+							kHandler.updateRoom(c);	
 				}
+						break;
 			}
+		}
 		}
 		super.onEvent(event);
 	}
@@ -747,13 +755,39 @@ public class RoomPanel extends BasePanel {
 	protected void process(IPartialPageRequestHandler handler, JSONObject o) throws IOException {
 		if (room.isVisible() && "room".equals(o.optString("area"))) {
 			final String type = o.optString("type");
+			final String action = o.optString("action");
 			if ("wb".equals(type)) {
 				WbAction a = WbAction.valueOf(o.getString(PARAM_ACTION));
 				wb.processWbAction(a, o.optJSONObject("data"), handler);
 			} else if ("room".equals(type)) {
+				if("rateStudent".equals(action)) {
+					rateStudent(handler,o);
+				}else {
 				sidebar.roomAction(handler, o);
 			}
+				
+			}
 		}
+		}
+	
+	// Rate Student Function - Starts
+	private void rateStudent(IPartialPageRequestHandler handler, JSONObject o) {
+		final String uid = o.getString("uid");		
+		if (Strings.isEmpty(uid)) {
+			return;
+		}
+		Client self = getClient();
+		Client c = cm.get(uid);
+		if(c == null || !(self.hasRight(Right.moderator) || self.hasRight(Right.superModerator))) {
+			return;
+		}
+		User u = c.getUser();		
+		u.setRating(u.getRating()+1);		
+		userDao.update(u, u.getId());
+		Client newClient = c.updateUser(userDao);
+		log.info("Updated Client "+newClient.toString());
+		cm.update(newClient);		
+		WebSocketHelper.sendRoom(new TextRoomMessage(getRoom().getId(), getClient(), RoomMessage.Type.rateStudent, newClient.getUid()));
 	}
 
 	public Room getRoom() {

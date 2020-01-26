@@ -328,6 +328,19 @@ public class User extends HistoricalEntity {
 	@Column(name = "domain_id")
 	@Element(data = true, required = false)
 	private Long domainId; // LDAP config id for LDAP, OAuth server id for OAuth
+	
+	// Add new column for rating
+	@Column(name = "rating", columnDefinition="integer default 0")
+	@Element(data = true, required = false)
+	private int rating;
+
+	public int getRating() {
+		return rating;
+	}
+
+	public void setRating(int rating) {
+		this.rating = rating;
+	}
 
 	@Override
 	public Long getId() {

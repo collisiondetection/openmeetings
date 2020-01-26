@@ -292,6 +292,11 @@ var Video = (function() {
 		v.parent().find('.ui-dialog-titlebar-buttonpane')
 			.append($('#video-volume-btn').children().clone())
 			.append($('#video-refresh-btn').children().clone());
+		if(!sd.user.rights){
+			v.parent().find('.ui-dialog-titlebar-buttonpane')
+				.append($('#rating-btn').children().clone());			
+			v.parent().find('#rating-star')[0].innerHTML = sd.user.rating;
+		}
 		const volume = v.parent().find('.dropdown-menu.video.volume');
 		slider = v.parent().find('.slider');
 		vol = v.parent().find('.ui-dialog-titlebar-volume')
@@ -321,6 +326,15 @@ var Video = (function() {
 		volume.on('mouseleave', function() {
 			$(this).hide();
 		});
+		// Add Rating Click logic
+		v.parent().find('.ui-dialog-titlebar-rating')
+			.click(function(e){
+				e.stopImmediatePropagation();
+				console.log("ererere",sd);				
+				OmUtil.roomAction({action: 'rateStudent', uid: sd.cuid});
+				return false;
+			});
+
 		handle = v.parent().find('.slider .handle');
 		slider.slider({
 			orientation: 'vertical'
@@ -517,7 +531,7 @@ var Video = (function() {
 			}
 		}
 	}
-
+			
 	self.update = _update;
 	self.refresh = _refresh;
 	self.mute = _mute;

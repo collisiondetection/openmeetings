@@ -350,6 +350,7 @@ public class Client implements IDataProviderEntity, IWsClient {
 				.put("displayName", user.getDisplayName())
 				.put("address", a)
 				.put("pictureUri", pictureUri)
+				.put("rating", user.getRating())
 				.put("rights", hasRight(Right.moderator));
 			if (user.getAddress() != null) {
 				if (Strings.isEmpty(user.getFirstname()) && Strings.isEmpty(user.getLastname())) {
@@ -440,7 +441,7 @@ public class Client implements IDataProviderEntity, IWsClient {
 	@Override
 	public String toString() {
 		return "Client [uid=" + uid + ", sessionId=" + sessionId + ", pageId=" + pageId + ", userId=" + user.getId() + ", room=" + (room == null ? null : room.getId())
-				+ ", rights=" + rights + ", sactivities=" + activities + ", connectedSince=" + connectedSince + "]";
+				+ ", rights=" + rights + ", sactivities=" + activities + ", connectedSince=" + connectedSince + ", rating= " + user.getRating()+"]";
 	}
 
 	public class StreamDesc implements Serializable {
@@ -556,7 +557,7 @@ public class Client implements IDataProviderEntity, IWsClient {
 
 		@Override
 		public String toString() {
-			return String.format("Stream[uid=%s,type=%s,activities=%s]", uid, type, sactivities);
+			return String.format("Stream[uid=%s,type=%s,activities=%s,rating=%s]", uid, type, sactivities, user.getRating());
 		}
 	}
 }

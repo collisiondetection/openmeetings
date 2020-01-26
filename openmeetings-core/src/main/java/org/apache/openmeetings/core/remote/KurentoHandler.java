@@ -188,6 +188,15 @@ public class KurentoHandler {
 				.toString()
 			);
 	}
+	
+	public void updateRoom(Client c) {
+		WebSocketHelper.sendAll(newKurentoMsg()
+				.put("id", "rateStudent")
+				.put("uid", c.getUid())
+				.put("rating", c.getUser().getRating())
+				.toString()
+			);
+	}
 
 	void sendShareUpdated(StreamDesc sd) {
 		sendClient(sd.getSid(), newKurentoMsg()

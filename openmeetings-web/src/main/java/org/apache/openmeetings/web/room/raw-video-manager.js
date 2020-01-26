@@ -101,6 +101,10 @@ var VideoManager = (function() {
 			case 'error':
 				OmUtil.error(m.message);
 				break;
+			case 'rateStudent':
+				const w = $(VID_SEL + ' div[data-client-uid="' + m.uid + '"]');        
+				w.parent().find('#rating-star')[0].innerHTML = m.rating;
+				break;
 			default:
 				//no-op
 		}
@@ -194,16 +198,7 @@ var VideoManager = (function() {
 		if (!inited) {
 			return;
 		}
-		var hasAdmin = false;
-		streams.forEach(function(sd){
-			if(sd.user.rights){
-				hasAdmin = true;
-			}
-		});
 		var count = 1;
-		if(hasAdmin){
-			count = 2; 
-		}
 		streams.forEach(function(sd,i) {						
 			const m = {stream: sd, iceServers: iceServers};
 			if (VideoUtil.isSharing(sd)) {
