@@ -36,7 +36,7 @@ var VideoManager = (function() {
 		if(sd.user.rights){
 			Video().init(msg); // Set position as 0 for admin
 		}else{
-			Video().init(msg,1); // Set position as 1 for same user
+			Video().init(msg,userCount); // Set position as 1 for same user
 		}
 		
 		OmUtil.log(uid + ' registered in room');
@@ -224,6 +224,7 @@ var VideoManager = (function() {
 				
 			}
 		});
+		userCount = count;
 	}
 	function _close(uid, showShareBtn) {
 		const v = $('#' + VideoUtil.getVid(uid));
