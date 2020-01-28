@@ -278,13 +278,10 @@ var Video = (function() {
 					VideoManager.close(sd.uid, true);
 				});
 			}
-			v.dialogExtend({
-				icons: {
-					'collapse': 'ui-icon-minus'
-				}
-				, closable: VideoUtil.isSharing(sd)
-				, collapsable: true
-				, dblclick: 'collapse'
+			v.dialogExtend({				
+				closable: VideoUtil.isSharing(sd)
+				, collapsable: false
+				, dblclick: false			
 			});
 		}
 	}
