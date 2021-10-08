@@ -1,5 +1,5 @@
 
-We have attempted to make a lower third to arrange  webcams into their own section:
+We created  a lower third to arrange  webcams into their own section:
 
 ![image](https://user-images.githubusercontent.com/4151385/136598630-64a07d8e-d1f6-42e5-8144-3436d9bca7aa.png)
 
