@@ -17,10 +17,15 @@ FROM maven:3-eclipse-temurin-21 AS builder
 WORKDIR /build
 COPY . .
 # -PallModules matches this project's own documented build command (README.md).
-# Skip tests here -- this is a dev/patch-iteration image, not a release artifact;
-# the full test suite can still be run separately (mvn test) when actually
-# validating a patch, not on every image rebuild.
-RUN mvn -B clean install -PallModules -DskipTests
+# -Pquick is the project's own dev-build profile (pom.xml) -- skips tests, site
+# generation, and Apache RAT's license-header check, and switches Wicket to
+# DEVELOPMENT mode. RAT in particular fails a straight `mvn install` on a plain
+# git checkout outside Apache's own release-prep process (confirmed: the very
+# first build attempt here failed on "UNAPPROVED" RAT counters with no patch
+# applied yet), so skipping it is required just to get a vanilla build working,
+# not something introduced by a patch. The full test suite can still be run
+# separately (mvn test) when actually validating a patch, not on every rebuild.
+RUN mvn -B clean install -PallModules,quick
 
 # ---- Runtime stage (verbatim structure from openmeetings/openmeetings-docker@9.1.1) ----
 FROM ubuntu:24.04
