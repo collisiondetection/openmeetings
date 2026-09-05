@@ -18,20 +18,31 @@ FROM maven:3-eclipse-temurin-21 AS builder
 WORKDIR /build
 COPY . .
 # -PallModules matches this project's own documented build command (README.md).
-# -Pquick is the project's own dev-build profile (pom.xml) -- skips tests, site
-# generation, and Apache RAT's license-header check, and switches Wicket to
-# DEVELOPMENT mode. RAT in particular fails a straight `mvn install` on a plain
-# git checkout outside Apache's own release-prep process (confirmed: the very
-# first build attempt here failed on "UNAPPROVED" RAT counters with no patch
-# applied yet), so skipping it is required just to get a vanilla build working,
-# not something introduced by a patch. The full test suite can still be run
+#
+# -Dom.quick.build=true skips Apache RAT's license-header check (RAT fails a
+# straight `mvn install` on a plain git checkout outside Apache's own
+# release-prep process -- confirmed: the very first build attempt here failed
+# on "UNAPPROVED" RAT counters with no patch applied yet, so this is required
+# just to get a vanilla build working, not something introduced by a patch).
+#
+# Deliberately NOT `-Pquick` (the project's own profile of the same name):
+# activating that profile also silently swaps openmeetings-server's assembly
+# descriptor to quick.xml, which only produces a bare directory (`dir` format,
+# no tar.gz at all) meant for redeploying onto an ALREADY-RUNNING dev install
+# -- not a standalone release artifact. Confirmed the hard way: the second
+# build attempt reported BUILD SUCCESS but left no
+# apache-openmeetings-*.tar.gz anywhere under target/. Setting the plain
+# property instead of the profile skips RAT/tests without touching
+# assembly.descriptor/assembly.finalName, which stay at their real defaults
+# ("server" / "apache-openmeetings-${project.version}") -- the same shape as
+# the actual archive.apache.org release. The full test suite can still be run
 # separately (mvn test) when actually validating a patch, not on every rebuild.
 #
 # Cache-mount the local Maven repo -- without it, every rebuild (including one
 # that only changes a single Java file to test a patch) re-downloads this
 # multi-module project's entire dependency tree from scratch, which is both
 # slow and needlessly wasteful of bandwidth on every iteration.
-RUN --mount=type=cache,target=/root/.m2 mvn -B clean install -PallModules,quick
+RUN --mount=type=cache,target=/root/.m2 mvn -B clean install -PallModules -Dom.quick.build=true -DskipTests
 
 # ---- Runtime stage (verbatim structure from openmeetings/openmeetings-docker@9.1.1) ----
 FROM ubuntu:24.04
