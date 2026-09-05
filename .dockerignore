@@ -16,3 +16,4 @@
 # already handle .git on their own -- it was never the actual problem.
 docker/
 **/target/
+.dockerignore
