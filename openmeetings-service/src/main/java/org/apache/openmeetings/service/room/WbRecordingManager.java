@@ -79,6 +79,13 @@ public final class WbRecordingManager {
 		File dir = OmFileHelper.getStreamsSubDir(roomId);
 		File file = new File(dir, OmFileHelper.getName(WB_LOG_PREFIX + System.currentTimeMillis(), WB_LOG_EXT));
 		Session session = new Session(Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8), file);
+		// World-readable: this log is written for a different consumer (Moodle,
+		// reading it from a different container over a shared volume) to read, not
+		// just this JVM -- the default create mode (umask-dependent, seen 640 owned
+		// by this process's own user in testing) left it unreadable cross-container.
+		if (!file.setReadable(true, false)) {
+			log.warn("Could not make whiteboard log world-readable: {}", file.getAbsolutePath());
+		}
 		writeLine(session, new JSONObject()
 				.put("type", "snapshot")
 				.put("ts", System.currentTimeMillis())
