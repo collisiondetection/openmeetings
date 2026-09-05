@@ -22,6 +22,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Writer;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
@@ -162,11 +164,17 @@ public final class WbRecordingManager {
 		try (CloseableHttpClient client = HttpClients.custom().setDefaultRequestConfig(timeout).build()) {
 			for (JSONObject item : items) {
 				String uid = item.optString("uid", null);
-				String src = firstNonEmpty(item.optString("src", null), item.optString("_src_und", null));
+				// Prefer the OM-authored "_src" (wb.js's own extraProps whitelist --
+				// for Clipart it's the clean relative path passed to fabric's
+				// Image.fromURL(), before the browser resolves it) over plain "src"
+				// (a standard fabric.js Image property that ends up holding
+				// whatever host:port the BROWSER resolved it to -- correct for that
+				// browser's tab, meaningless to this JVM's own loopback fetch).
+				String src = firstNonEmpty(item.optString("_src", null), item.optString("src", null));
 				if (uid == null || src == null) {
 					continue;
 				}
-				String url = src.startsWith("http") ? src : selfBaseUrl + (src.startsWith("/") ? src : "/" + src);
+				String url = toFetchableUrl(src, selfBaseUrl);
 				try (CloseableHttpResponse resp = client.execute(new HttpGet(url))) {
 					int status = resp.getStatusLine().getStatusCode();
 					if (status != 200) {
@@ -208,6 +216,31 @@ public final class WbRecordingManager {
 
 	private static String firstNonEmpty(String a, String b) {
 		return (a != null && !a.isEmpty()) ? a : b;
+	}
+
+	/**
+	 * Resolves any src value (relative, or absolute-but-pointing-at-whatever-host
+	 * the browser that created it happened to be on) to a URL this JVM can
+	 * actually fetch over its own loopback -- the authority (scheme+host+port)
+	 * always comes from selfBaseUrl, never from an absolute src, since a browser's
+	 * own externally-visible address is frequently NOT this server's internal one
+	 * (true in this project's own production topology: TLS-terminated public
+	 * hostname vs. the OM JVM's internal loopback port -- the exact case that
+	 * surfaced this as a real Connection Refused, not just a defensive guess).
+	 */
+	private static String toFetchableUrl(String rawSrc, String selfBaseUrl) {
+		try {
+			if (rawSrc.startsWith("http")) {
+				URI src = new URI(rawSrc);
+				URI base = new URI(selfBaseUrl);
+				String pathAndQuery = src.getRawPath() + (src.getRawQuery() != null ? "?" + src.getRawQuery() : "");
+				return base.getScheme() + "://" + base.getAuthority() + pathAndQuery;
+			}
+			String rel = rawSrc.startsWith("./") ? rawSrc.substring(1) : (rawSrc.startsWith("/") ? rawSrc : "/" + rawSrc);
+			return selfBaseUrl + rel;
+		} catch (URISyntaxException e) {
+			return rawSrc;
+		}
 	}
 
 	private static String extensionFor(String contentType) {
