@@ -28,6 +28,7 @@ import java.util.function.Predicate;
 
 import org.apache.openmeetings.db.entity.basic.Client;
 import org.apache.openmeetings.db.entity.file.BaseFileItem;
+import org.apache.openmeetings.service.room.WbRecordingManager;
 import org.apache.openmeetings.util.ws.IClusterWsMessage;
 import org.apache.openmeetings.web.room.RoomPreviewResourceReference;
 import org.apache.openmeetings.web.room.RoomResourceReference;
@@ -167,6 +168,9 @@ public class WbWebSocketHelper {
 			publish(new WsMessageWbFile(roomId, wbId, ruid, file, fi));
 		}
 		final JSONObject f = addFileUrl(ruid, file, fi, null);
+		// Logged pre-patch: patchUrls()'s per-client `&uid=` suffix is a live-delivery
+		// mechanism only, not meaningful for a persisted replay log.
+		WbRecordingManager.record(roomId, WbAction.CREATE_OBJ.jsName(), getObjWbJson(wbId, f));
 		sendRoom(
 				roomId
 				, new JSONObject().put("type", "wb")
@@ -176,6 +180,7 @@ public class WbWebSocketHelper {
 	}
 
 	private static void sendWb(Long roomId, WbAction meth, JSONObject obj, Predicate<Client> check) {
+		WbRecordingManager.record(roomId, meth.jsName(), obj);
 		sendRoom(
 				roomId
 				, new JSONObject().put("type", "wb")
