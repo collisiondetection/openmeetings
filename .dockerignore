@@ -1,0 +1,13 @@
+# The docker build tooling itself isn't part of the Maven reactor, and more
+# importantly isn't Apache-licensed source -- copying it into the build
+# context made Apache RAT's license-header check (bound to the root pom.xml,
+# `mvn install`) scan it and fail with "UNAPPROVED" counters. That failure
+# was misdiagnosed once already as "RAT always fails on a plain checkout" --
+# it didn't; it failed because these files were in the context with no
+# license header. Excluding them here is the actual fix; om.quick.build no
+# longer needs to be touched at all (see docker/Dockerfile's own comment on
+# why that property also has to skip Tomcat-unpacking as an unwanted side
+# effect).
+docker/
+.git/
+**/target/
