@@ -20,24 +20,18 @@ package org.apache.openmeetings.service.room;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.Writer;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.apache.http.HttpEntity;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
+import org.apache.openmeetings.db.dao.file.FileItemDao;
+import org.apache.openmeetings.db.entity.file.BaseFileItem;
 import org.apache.openmeetings.util.NullStringer;
 import org.apache.openmeetings.util.OmFileHelper;
 import org.slf4j.Logger;
@@ -123,32 +117,58 @@ public final class WbRecordingManager {
 	}
 
 	/**
-	 * Exports any room/session-scoped file asset referenced by the room's
-	 * current board items (uploaded images/PDF pages/video posters -- anything
-	 * that went through WbWebSocketHelper.sendWbFile/addFileUrl, NOT built-in
-	 * clipart, which already uses a permanent static path) to durable local
-	 * files alongside the JSONL log, and appends a manifest line mapping each
-	 * object's uid to its exported path.
+	 * Exports every file-backed whiteboard object referenced by this
+	 * session's OWN recorded events (uploaded images/PDF pages/video posters
+	 * -- anything that went through WbWebSocketHelper.sendWbFile/addFileUrl,
+	 * identified by carrying a "fileId" -- NOT built-in clipart, which is
+	 * placed entirely client-side, never goes through that path, and already
+	 * uses a permanent bundled-asset path that needs no export at all) to
+	 * durable local files alongside the JSONL log, and appends a manifest
+	 * line mapping each object's uid to its exported path.
 	 *
-	 * Must run while the room is still live: addFileUrl() builds these URLs
-	 * with the room's current Whiteboards session uid (ruid) baked in via
-	 * Wicket's own RequestCycle-bound URL rendering, which this class has no
-	 * access to (it isn't a Wicket request) and doesn't need -- by the time an
-	 * event reaches record(), the URL is already a plain, fully-resolved
-	 * string. Fetching an already-built URL is just HTTP; only building a NEW
-	 * one needs Wicket. Once the room rotates or this session's Whiteboards
-	 * entry is evicted, that ruid stops resolving -- this is the one window
-	 * where it's guaranteed to still work, which is why this runs at stop(),
-	 * not later.
+	 * Reads the file DIRECTLY off disk via fileDao, rather than fetching a
+	 * URL over HTTP (an earlier version of this method did exactly that, and
+	 * it's worth recording exactly why that failed rather than just changing
+	 * it silently): RoomResourceReference.getFileItem() -- the handler
+	 * behind every "room/file/{id}?ruid=..&wuid=.." URL these objects carry
+	 * -- hard-requires `WebSession.get().isSignedIn()` plus a currently-
+	 * connected Client resolved from the URL's own "uid" param
+	 * (ClientManager.get(uid)). Confirmed live: a real PRESENTATION object's
+	 * own logged URL, fetched by this class's own plain unauthenticated
+	 * HttpClient moments after creation, got a clean 404 --
+	 * "No file item was found" -- not a timing issue or a rotated ruid, but
+	 * a structural one: a bare server-side HTTP client can never carry a
+	 * signed-in Wicket session or correspond to a live connected client, so
+	 * that URL is fundamentally unfetchable from outside a real browser
+	 * session, at any point in the room's lifetime. Since this class already
+	 * runs inside the same JVM as everything else, going around HTTP
+	 * entirely and resolving the file the same way RoomResourceReference
+	 * itself ultimately does -- fileDao.getAny(fileId) then
+	 * BaseFileItem.getFile(ext) -- sidesteps the auth requirement completely
+	 * (it's a plain DB lookup + a File on local disk, not a request).
+	 *
+	 * Also deliberately does NOT ask the live Whiteboards/Whiteboard state
+	 * (Whiteboard.list()) for which objects exist, despite that being the
+	 * obvious first approach (and what an even earlier version of this
+	 * method did) -- confirmed separately that the object as durably stored
+	 * there never carries a "fileId"-adjacent src at all; only this
+	 * session's own event log ever saw the object in the shape broadcast to
+	 * clients. Reconstructing from the log (createObj sets, modifyObj merges
+	 * into whatever's already known -- a partial update, matching how the
+	 * client applies it -- deleteObj removes) is what makes the fileId
+	 * itself available to look up in the first place.
 	 *
 	 * @param roomId room being stopped
-	 * @param items current board objects (e.g. Whiteboard.list() per board)
-	 * @param selfBaseUrl this OM instance's own origin, e.g. "http://localhost:5080" --
-	 *                     used only when a found src is context-relative, not absolute.
+	 * @param fileDao used to resolve each fileId to a real BaseFileItem and its
+	 *                on-disk File -- the same DAO RoomResourceReference itself uses.
 	 */
-	public static void exportAssets(Long roomId, List<JSONObject> items, String selfBaseUrl) {
+	public static void exportAssets(Long roomId, FileItemDao fileDao) {
 		Session session = ACTIVE.get(roomId);
-		if (session == null || items == null || items.isEmpty()) {
+		if (session == null) {
+			return;
+		}
+		List<JSONObject> items = reconstructFileBearingObjects(session.file);
+		if (items.isEmpty()) {
 			return;
 		}
 		File assetsDir = new File(OmFileHelper.getStreamsSubDir(roomId), "assets");
@@ -159,43 +179,32 @@ public final class WbRecordingManager {
 		markWorldTraversable(assetsDir);
 
 		Map<String, String> manifest = new HashMap<>();
-		RequestConfig timeout = RequestConfig.custom()
-				.setConnectTimeout(10_000).setSocketTimeout(10_000).build();
-		try (CloseableHttpClient client = HttpClients.custom().setDefaultRequestConfig(timeout).build()) {
-			for (JSONObject item : items) {
-				String uid = item.optString("uid", null);
-				// Prefer the OM-authored "_src" (wb.js's own extraProps whitelist --
-				// for Clipart it's the clean relative path passed to fabric's
-				// Image.fromURL(), before the browser resolves it) over plain "src"
-				// (a standard fabric.js Image property that ends up holding
-				// whatever host:port the BROWSER resolved it to -- correct for that
-				// browser's tab, meaningless to this JVM's own loopback fetch).
-				String src = firstNonEmpty(item.optString("_src", null), item.optString("src", null));
-				if (uid == null || src == null) {
+		for (JSONObject item : items) {
+			String uid = item.optString("uid", null);
+			long fileId = item.optLong("fileId", -1);
+			if (uid == null || fileId < 0) {
+				continue; // not file-backed (a drawn shape, text, math formula, clipart, ...)
+			}
+			try {
+				BaseFileItem fi = fileDao.getAny(fileId);
+				if (fi == null) {
+					log.warn("Asset export: fileId {} (uid {}) not found for room {}", fileId, uid, roomId);
 					continue;
 				}
-				String url = toFetchableUrl(src, selfBaseUrl);
-				try (CloseableHttpResponse resp = client.execute(new HttpGet(url))) {
-					int status = resp.getStatusLine().getStatusCode();
-					if (status != 200) {
-						log.warn("Asset export got HTTP {} for uid {} url {}", status, uid, url);
-						continue;
-					}
-					HttpEntity entity = resp.getEntity();
-					String contentType = entity.getContentType() != null ? entity.getContentType().getValue() : "";
-					File dest = new File(assetsDir, uid + "." + extensionFor(contentType));
-					try (InputStream in = entity.getContent()) {
-						Files.copy(in, dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
-					}
-					markWorldReadable(dest);
-					manifest.put(uid, "assets/" + dest.getName());
-				} catch (Exception e) {
-					log.error("Failed to export whiteboard asset for room {}, uid {}", roomId, uid, e);
+				String ext = fi.getType() == BaseFileItem.Type.PRESENTATION
+						? String.valueOf(item.optInt("slide", 0)) : null;
+				File src = fi.getFile(ext);
+				if (src == null || !src.exists()) {
+					log.warn("Asset export: no on-disk file for fileId {} (uid {}), room {}", fileId, uid, roomId);
+					continue;
 				}
+				File dest = new File(assetsDir, uid + "." + extensionOf(src.getName()));
+				Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
+				markWorldReadable(dest);
+				manifest.put(uid, "assets/" + dest.getName());
+			} catch (Exception e) {
+				log.error("Failed to export whiteboard asset for room {}, uid {}", roomId, uid, e);
 			}
-		} catch (IOException e) {
-			log.error("Failed to export whiteboard assets for room {}", roomId, e);
-			return;
 		}
 		if (!manifest.isEmpty()) {
 			JSONObject manifestJson = new JSONObject();
@@ -214,46 +223,81 @@ public final class WbRecordingManager {
 		}
 	}
 
-	private static String firstNonEmpty(String a, String b) {
-		return (a != null && !a.isEmpty()) ? a : b;
-	}
-
 	/**
-	 * Resolves any src value (relative, or absolute-but-pointing-at-whatever-host
-	 * the browser that created it happened to be on) to a URL this JVM can
-	 * actually fetch over its own loopback -- the authority (scheme+host+port)
-	 * always comes from selfBaseUrl, never from an absolute src, since a browser's
-	 * own externally-visible address is frequently NOT this server's internal one
-	 * (true in this project's own production topology: TLS-terminated public
-	 * hostname vs. the OM JVM's internal loopback port -- the exact case that
-	 * surfaced this as a real Connection Refused, not just a defensive guess).
+	 * Replays this session's own JSONL log (createObj/modifyObj/deleteObj
+	 * only -- setSlide/createWb/activateWb/setSize carry no object state)
+	 * to reconstruct the last-known JSON for every object still present at
+	 * the point this is called. This is the ONLY place these objects' file
+	 * URLs are ever available in resolved form -- see the caller's doc
+	 * comment for why the live Whiteboard.list() state can't be used
+	 * instead. modifyObj MERGES into whatever's already known for that uid
+	 * (a partial update, matching how the client applies it) rather than
+	 * replacing wholesale, so a later resize/move of a file object doesn't
+	 * wipe out the _src/fileId fields its own createObj already captured.
+	 *
+	 * NOT reconstructed: an object already on the board when recording
+	 * STARTED (present in the opening snapshot, never a createObj in this
+	 * session's own log) -- if it's file-bearing, no event in this log ever
+	 * carried its resolved URL, so it genuinely isn't recoverable from this
+	 * source. Narrower and rarer than the case this method fixes (a file
+	 * attached DURING the recorded session, the normal case for a lesson
+	 * PDF applied right before or during class).
 	 */
-	private static String toFetchableUrl(String rawSrc, String selfBaseUrl) {
+	private static List<JSONObject> reconstructFileBearingObjects(File logFile) {
+		Map<String, JSONObject> latestByUid = new HashMap<>();
+		List<String> lines;
 		try {
-			if (rawSrc.startsWith("http")) {
-				URI src = new URI(rawSrc);
-				URI base = new URI(selfBaseUrl);
-				String pathAndQuery = src.getRawPath() + (src.getRawQuery() != null ? "?" + src.getRawQuery() : "");
-				return base.getScheme() + "://" + base.getAuthority() + pathAndQuery;
-			}
-			String rel = rawSrc.startsWith("./") ? rawSrc.substring(1) : (rawSrc.startsWith("/") ? rawSrc : "/" + rawSrc);
-			return selfBaseUrl + rel;
-		} catch (URISyntaxException e) {
-			return rawSrc;
+			lines = Files.readAllLines(logFile.toPath(), StandardCharsets.UTF_8);
+		} catch (IOException e) {
+			log.error("Failed to re-read whiteboard log for asset export: {}", logFile.getAbsolutePath(), e);
+			return List.of();
 		}
+		for (String line : lines) {
+			JSONObject decoded;
+			try {
+				decoded = new JSONObject(line);
+			} catch (Exception e) {
+				continue;
+			}
+			if (!"event".equals(decoded.optString("type", null))) {
+				continue;
+			}
+			String func = decoded.optString("func", null);
+			JSONObject param = decoded.optJSONObject("param");
+			JSONObject obj = param == null ? null : param.optJSONObject("obj");
+			String uid = obj == null ? null : obj.optString("uid", null);
+			if (uid == null) {
+				continue;
+			}
+			switch (func == null ? "" : func) {
+				case "createObj":
+					latestByUid.put(uid, obj);
+					break;
+				case "modifyObj":
+					JSONObject existing = latestByUid.get(uid);
+					if (existing == null) {
+						latestByUid.put(uid, obj);
+					} else {
+						JSONObject merged = new JSONObject(existing.toString());
+						for (String key : obj.keySet()) {
+							merged.put(key, obj.get(key));
+						}
+						latestByUid.put(uid, merged);
+					}
+					break;
+				case "deleteObj":
+					latestByUid.remove(uid);
+					break;
+				default:
+					break;
+			}
+		}
+		return new ArrayList<>(latestByUid.values());
 	}
 
-	private static String extensionFor(String contentType) {
-		if (contentType.contains("png")) {
-			return "png";
-		} else if (contentType.contains("jpeg") || contentType.contains("jpg")) {
-			return "jpg";
-		} else if (contentType.contains("pdf")) {
-			return "pdf";
-		} else if (contentType.contains("video")) {
-			return "mp4";
-		}
-		return "bin";
+	private static String extensionOf(String fileName) {
+		int dot = fileName.lastIndexOf('.');
+		return dot < 0 || dot == fileName.length() - 1 ? "bin" : fileName.substring(dot + 1);
 	}
 
 	public static void record(Long roomId, String func, JSONObject param) {
