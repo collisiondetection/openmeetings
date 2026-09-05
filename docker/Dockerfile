@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Multi-stage build for a locally-patched OpenMeetings image.
 #
 # Unlike the official apache/openmeetings image (openmeetings/openmeetings-docker,
@@ -25,7 +26,12 @@ COPY . .
 # applied yet), so skipping it is required just to get a vanilla build working,
 # not something introduced by a patch. The full test suite can still be run
 # separately (mvn test) when actually validating a patch, not on every rebuild.
-RUN mvn -B clean install -PallModules,quick
+#
+# Cache-mount the local Maven repo -- without it, every rebuild (including one
+# that only changes a single Java file to test a patch) re-downloads this
+# multi-module project's entire dependency tree from scratch, which is both
+# slow and needlessly wasteful of bandwidth on every iteration.
+RUN --mount=type=cache,target=/root/.m2 mvn -B clean install -PallModules,quick
 
 # ---- Runtime stage (verbatim structure from openmeetings/openmeetings-docker@9.1.1) ----
 FROM ubuntu:24.04
