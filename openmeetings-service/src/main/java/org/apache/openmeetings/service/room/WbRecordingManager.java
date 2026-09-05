@@ -37,6 +37,7 @@ import org.apache.openmeetings.util.OmFileHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.openjson.JSONArray;
 import com.github.openjson.JSONObject;
 
 /**
@@ -147,28 +148,56 @@ public final class WbRecordingManager {
 	 * BaseFileItem.getFile(ext) -- sidesteps the auth requirement completely
 	 * (it's a plain DB lookup + a File on local disk, not a request).
 	 *
-	 * Also deliberately does NOT ask the live Whiteboards/Whiteboard state
-	 * (Whiteboard.list()) for which objects exist, despite that being the
-	 * obvious first approach (and what an even earlier version of this
-	 * method did) -- confirmed separately that the object as durably stored
-	 * there never carries a "fileId"-adjacent src at all; only this
-	 * session's own event log ever saw the object in the shape broadcast to
-	 * clients. Reconstructing from the log (createObj sets, modifyObj merges
-	 * into whatever's already known -- a partial update, matching how the
-	 * client applies it -- deleteObj removes) is what makes the fileId
-	 * itself available to look up in the first place.
+	 * Also asks the live Whiteboards/Whiteboard state (Whiteboard.list()) for
+	 * whichever file-backed objects the session's own log can't cover: one
+	 * present in the OPENING SNAPSHOT (added via addFileToWb() in
+	 * WbPanel.java -- e.g. a lesson PDF attached at room CREATION, which is
+	 * how this actually happens in real production sessions, see
+	 * tutorship_create_session_room()'s files=[{fileId,wbIdx}]) never
+	 * appears as a createObj in this session's own log, so the log alone
+	 * can't see it. An earlier version of this method skipped the live
+	 * state entirely based on a real but narrower finding -- that a live
+	 * object's stored JSON never carries a resolved "_src" URL, only
+	 * "fileId" -- and mistakenly treated that as "fileId itself isn't
+	 * there either". Checked directly against addFileToWb() (WbPanel.java):
+	 * it calls wb.put(wuid, file) with a JSONObject that DOES include
+	 * ATTR_FILE_ID, in the exact same shape a live createObj stores -- so
+	 * Whiteboard.list() is a perfectly good fileId source, just never a
+	 * _src source, which is fine since this method never reads _src at all
+	 * (DAO lookup by fileId, not a URL fetch). Log-reconstructed items win
+	 * on a uid collision (shouldn't occur -- a uid is never reused for a
+	 * different object) so the live scan only ever fills in uids the log
+	 * genuinely never saw.
 	 *
 	 * @param roomId room being stopped
 	 * @param fileDao used to resolve each fileId to a real BaseFileItem and its
 	 *                on-disk File -- the same DAO RoomResourceReference itself uses.
+	 * @param liveItems every board's current Whiteboard.list() for this room, from
+	 *                   the caller's own already-live Whiteboards handle -- fetching
+	 *                   it again from in here would need a manager reference this
+	 *                   class doesn't otherwise have any reason to hold.
 	 */
-	public static void exportAssets(Long roomId, FileItemDao fileDao) {
+	public static void exportAssets(Long roomId, FileItemDao fileDao, List<JSONObject> liveItems) {
 		Session session = ACTIVE.get(roomId);
 		if (session == null) {
 			return;
 		}
-		List<JSONObject> items = reconstructFileBearingObjects(session.file);
-		if (items.isEmpty()) {
+		Map<String, JSONObject> byUid = new HashMap<>();
+		for (JSONObject item : reconstructFileBearingObjects(session.file)) {
+			String uid = item.optString("uid", null);
+			if (uid != null) {
+				byUid.put(uid, item);
+			}
+		}
+		if (liveItems != null) {
+			for (JSONObject item : liveItems) {
+				String uid = item.optString("uid", null);
+				if (uid != null) {
+					byUid.putIfAbsent(uid, item);
+				}
+			}
+		}
+		if (byUid.isEmpty()) {
 			return;
 		}
 		File assetsDir = new File(OmFileHelper.getStreamsSubDir(roomId), "assets");
@@ -178,8 +207,8 @@ public final class WbRecordingManager {
 		}
 		markWorldTraversable(assetsDir);
 
-		Map<String, String> manifest = new HashMap<>();
-		for (JSONObject item : items) {
+		Map<String, Object> manifest = new HashMap<>();
+		for (JSONObject item : byUid.values()) {
 			String uid = item.optString("uid", null);
 			long fileId = item.optLong("fileId", -1);
 			if (uid == null || fileId < 0) {
@@ -191,24 +220,48 @@ public final class WbRecordingManager {
 					log.warn("Asset export: fileId {} (uid {}) not found for room {}", fileId, uid, roomId);
 					continue;
 				}
-				String ext = fi.getType() == BaseFileItem.Type.PRESENTATION
-						? String.valueOf(item.optInt("slide", 0)) : null;
-				File src = fi.getFile(ext);
-				if (src == null || !src.exists()) {
-					log.warn("Asset export: no on-disk file for fileId {} (uid {}), room {}", fileId, uid, roomId);
-					continue;
+				if (fi.getType() == BaseFileItem.Type.PRESENTATION) {
+					// A presentation is N separate page images -- fi.getFile(slide)
+					// per page -- not one file. The client's own wb.js fetches every
+					// page the same way (fabric.FabricImage.fromURL(_o._src +
+					// '&slide=' + i) for i in [0,count)). Exporting only the item's
+					// CURRENT slide, as this method used to, silently stranded every
+					// other page -- fine for a single-page PDF, broken for the
+					// multi-page lesson PDFs this whole feature is actually for.
+					int count = Math.max(1, item.optInt("count", 1));
+					JSONArray slidePaths = new JSONArray();
+					for (int slide = 0; slide < count; slide++) {
+						File src = fi.getFile(String.valueOf(slide));
+						if (src == null || !src.exists()) {
+							log.warn("Asset export: no on-disk file for fileId {} (uid {}) slide {}, room {}", fileId, uid, slide, roomId);
+							continue;
+						}
+						File dest = new File(assetsDir, uid + "_" + slide + "." + extensionOf(src.getName()));
+						Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
+						markWorldReadable(dest);
+						slidePaths.put("assets/" + dest.getName());
+					}
+					if (slidePaths.length() > 0) {
+						manifest.put(uid, slidePaths);
+					}
+				} else {
+					File src = fi.getFile(null);
+					if (src == null || !src.exists()) {
+						log.warn("Asset export: no on-disk file for fileId {} (uid {}), room {}", fileId, uid, roomId);
+						continue;
+					}
+					File dest = new File(assetsDir, uid + "." + extensionOf(src.getName()));
+					Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
+					markWorldReadable(dest);
+					manifest.put(uid, "assets/" + dest.getName());
 				}
-				File dest = new File(assetsDir, uid + "." + extensionOf(src.getName()));
-				Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
-				markWorldReadable(dest);
-				manifest.put(uid, "assets/" + dest.getName());
 			} catch (Exception e) {
 				log.error("Failed to export whiteboard asset for room {}, uid {}", roomId, uid, e);
 			}
 		}
 		if (!manifest.isEmpty()) {
 			JSONObject manifestJson = new JSONObject();
-			for (Map.Entry<String, String> e : manifest.entrySet()) {
+			for (Map.Entry<String, Object> e : manifest.entrySet()) {
 				manifestJson.put(e.getKey(), e.getValue());
 			}
 			try {
@@ -226,22 +279,23 @@ public final class WbRecordingManager {
 	/**
 	 * Replays this session's own JSONL log (createObj/modifyObj/deleteObj
 	 * only -- setSlide/createWb/activateWb/setSize carry no object state)
-	 * to reconstruct the last-known JSON for every object still present at
-	 * the point this is called. This is the ONLY place these objects' file
-	 * URLs are ever available in resolved form -- see the caller's doc
-	 * comment for why the live Whiteboard.list() state can't be used
-	 * instead. modifyObj MERGES into whatever's already known for that uid
-	 * (a partial update, matching how the client applies it) rather than
-	 * replacing wholesale, so a later resize/move of a file object doesn't
-	 * wipe out the _src/fileId fields its own createObj already captured.
+	 * to reconstruct the last-known JSON for every file-bearing object
+	 * CREATED DURING this recorded session. modifyObj MERGES into whatever's
+	 * already known for that uid (a partial update, matching how the client
+	 * applies it) rather than replacing wholesale, so a later resize/move of
+	 * a file object doesn't wipe out the fileId its own createObj already
+	 * captured.
 	 *
-	 * NOT reconstructed: an object already on the board when recording
-	 * STARTED (present in the opening snapshot, never a createObj in this
-	 * session's own log) -- if it's file-bearing, no event in this log ever
-	 * carried its resolved URL, so it genuinely isn't recoverable from this
-	 * source. Narrower and rarer than the case this method fixes (a file
-	 * attached DURING the recorded session, the normal case for a lesson
-	 * PDF applied right before or during class).
+	 * NOT reconstructed here: an object already on the board when recording
+	 * STARTED (present in the opening snapshot) never appears as a createObj
+	 * in this session's own log, so this method alone can't see it -- this
+	 * is in fact the NORMAL case for a lesson PDF, which gets attached at
+	 * ROOM CREATION (addFileToWb() in WbPanel.java, driven by
+	 * tutorship_create_session_room()'s files=[{fileId,wbIdx}]), before
+	 * recording ever starts. The caller covers this gap by also passing in
+	 * the room's live Whiteboard.list() state -- see exportAssets()'s own
+	 * doc comment for why that's a safe, sufficient source for fileId
+	 * despite not carrying a resolved _src.
 	 */
 	private static List<JSONObject> reconstructFileBearingObjects(File logFile) {
 		Map<String, JSONObject> latestByUid = new HashMap<>();

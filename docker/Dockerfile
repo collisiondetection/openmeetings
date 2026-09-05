@@ -62,7 +62,14 @@ RUN rm -rf docker
 # that only changes a single Java file to test a patch) re-downloads this
 # multi-module project's entire dependency tree from scratch, which is both
 # slow and needlessly wasteful of bandwidth on every iteration.
-RUN --mount=type=cache,target=/root/.m2 mvn -B clean install -PallModules -DskipTests
+# -Dmaven.javadoc.skip=true: -PallModules's attach-javadocs binding tries to
+# cross-link against https://cxf.apache.org/javadoc/... at build time, which
+# this sandboxed build environment has no route to (UnknownHostException,
+# not transient -- retrying doesn't help). Irrelevant to a running server
+# either way -- javadoc jars are a doc-distribution artifact, never loaded
+# at runtime, and -DskipTests already means no test coverage is being
+# traded away here.
+RUN --mount=type=cache,target=/root/.m2 mvn -B clean install -PallModules -DskipTests -Dmaven.javadoc.skip=true
 
 # ---- Runtime stage (verbatim structure from openmeetings/openmeetings-docker@9.1.1) ----
 FROM ubuntu:24.04

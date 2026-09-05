@@ -27,6 +27,8 @@ import java.io.ByteArrayInputStream;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import javax.imageio.ImageIO;
@@ -349,12 +351,20 @@ public class WbWebService extends BaseWebService {
 		log.debug("[stopRecording] room id {}", id);
 		return performCall(sid, User.Right.SOAP, sd -> {
 			try {
-				// Export while still ACTIVE -- needs the open session's own log
-				// file to reconstruct each file object's fileId (see
-				// WbRecordingManager.exportAssets()'s doc comment for why that
-				// log, not live Whiteboards/Whiteboard state or the object's own
-				// broadcast URL, is the only usable source).
-				WbRecordingManager.exportAssets(id, fileDao);
+				// Export while still ACTIVE and still LIVE -- both the session's
+				// own log (covers file objects created DURING this recording) and
+				// the room's current Whiteboard.list() state (covers ones already
+				// on the board when recording STARTED, e.g. a lesson PDF attached
+				// at room creation -- the normal production case) are only
+				// guaranteed valid right up until stop() below. See
+				// WbRecordingManager.exportAssets()'s doc comment for the full
+				// story of why both sources are needed, not just one.
+				List<JSONObject> liveItems = new ArrayList<>();
+				Whiteboards wbs = wbManager.get(id);
+				for (Whiteboard board : wbs.getWhiteboards().values()) {
+					liveItems.addAll(board.list());
+				}
+				WbRecordingManager.exportAssets(id, fileDao, liveItems);
 				WbRecordingManager.stop(id);
 				return new ServiceResult("Stopped", Type.SUCCESS);
 			} catch (Exception e) {
