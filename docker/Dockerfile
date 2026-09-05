@@ -19,30 +19,33 @@ WORKDIR /build
 COPY . .
 # -PallModules matches this project's own documented build command (README.md).
 #
-# -Dom.quick.build=true skips Apache RAT's license-header check (RAT fails a
-# straight `mvn install` on a plain git checkout outside Apache's own
-# release-prep process -- confirmed: the very first build attempt here failed
-# on "UNAPPROVED" RAT counters with no patch applied yet, so this is required
-# just to get a vanilla build working, not something introduced by a patch).
-#
-# Deliberately NOT `-Pquick` (the project's own profile of the same name):
-# activating that profile also silently swaps openmeetings-server's assembly
-# descriptor to quick.xml, which only produces a bare directory (`dir` format,
-# no tar.gz at all) meant for redeploying onto an ALREADY-RUNNING dev install
-# -- not a standalone release artifact. Confirmed the hard way: the second
-# build attempt reported BUILD SUCCESS but left no
-# apache-openmeetings-*.tar.gz anywhere under target/. Setting the plain
-# property instead of the profile skips RAT/tests without touching
-# assembly.descriptor/assembly.finalName, which stay at their real defaults
-# ("server" / "apache-openmeetings-${project.version}") -- the same shape as
-# the actual archive.apache.org release. The full test suite can still be run
-# separately (mvn test) when actually validating a patch, not on every rebuild.
+# Two earlier, WRONG fixes for the initial RAT ("UNAPPROVED" license-header
+# counters) failure, both reverted -- recorded so they aren't tried again:
+#   1. `-Pquick` skipped RAT, but that profile also silently swaps
+#      openmeetings-server's assembly descriptor to quick.xml, whose only
+#      <format> is a bare directory -- no tar.gz at all. BUILD SUCCESS, no
+#      artifact.
+#   2. `-Dom.quick.build=true` (the property the quick profile itself sets)
+#      skips RAT without touching the assembly descriptor -- but that same
+#      property ALSO gates the maven-dependency-plugin's `get-tomcat` unpack
+#      execution (shared plugin-level <skip> config in openmeetings-server's
+#      pom.xml), so the resulting tarball had no bin/catalina.sh at all
+#      ("sudo: /opt/openmeetings/bin/catalina.sh: command not found" at
+#      runtime).
+# The RAT failure was never actually caused by a plain OM checkout -- it was
+# THIS Dockerfile's own `docker/` directory (no Apache license headers)
+# being swept into the build context by `COPY . .` and scanned along with
+# real source. Fixed at the actual source with .dockerignore (excludes
+# docker/, .git/, target/), so the plain default build (no property
+# overrides at all) now passes RAT on its own and produces a complete,
+# correctly-shaped tarball. The full test suite can still be run separately
+# (mvn test) when actually validating a patch, not on every rebuild.
 #
 # Cache-mount the local Maven repo -- without it, every rebuild (including one
 # that only changes a single Java file to test a patch) re-downloads this
 # multi-module project's entire dependency tree from scratch, which is both
 # slow and needlessly wasteful of bandwidth on every iteration.
-RUN --mount=type=cache,target=/root/.m2 mvn -B clean install -PallModules -Dom.quick.build=true -DskipTests
+RUN --mount=type=cache,target=/root/.m2 mvn -B clean install -PallModules -DskipTests
 
 # ---- Runtime stage (verbatim structure from openmeetings/openmeetings-docker@9.1.1) ----
 FROM ubuntu:24.04
