@@ -50,6 +50,16 @@ if [ "${OM_TYPE}" == "min" ]; then
 		echo "Make data dir ${OM_DATA_DIR}"
 		mkdir "${OM_DATA_DIR}"
 	fi
+	# mkdir above runs as root; DAEMON_USER (the user catalina.sh actually runs as,
+	# see the sudo at the bottom of this script) needs write access to create its
+	# own subdirectories under here (streams/, upload/, ...) on first use. Without
+	# this, a fresh volume leaves DAEMON_USER unable to create any new top-level
+	# subdirectory here -- silently (mkdirs() returns false, doesn't throw),
+	# surfacing later as a confusing NoSuchFileException from deep inside whatever
+	# Java code tried to write the first file. Shallow, not -R: this only needs to
+	# unblock creating new subdirectories, not rewrite an entire potentially large,
+	# already-populated production volume's ownership on every boot.
+	chown ${DAEMON_USER} "${OM_DATA_DIR}"
 	sed -i "s|ws://127.0.0.1:8888/kurento|${OM_KURENTO_WS_URL}|g" ${CLASSES_HOME}/openmeetings.properties
 
 	export CATALINA_OPTS="-DDATA_DIR=${OM_DATA_DIR}"
