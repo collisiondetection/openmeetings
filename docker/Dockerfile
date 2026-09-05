@@ -17,10 +17,24 @@
 FROM maven:3-eclipse-temurin-21 AS builder
 WORKDIR /build
 COPY . .
-# -PallModules matches this project's own documented build command (README.md).
+# Delete this Dockerfile's own build tooling from the BUILDER STAGE's copy
+# before Maven ever runs -- it isn't part of the reactor, and more
+# importantly isn't Apache-licensed source, so leaving it in place makes
+# Apache RAT's license-header check (bound to the root pom.xml, runs during
+# `mvn install`) scan it and fail with "UNAPPROVED" counters. Confirmed by
+# name, not guessed: the build log's own "Files with unapproved licenses:"
+# line named the exact file both times this was gotten wrong (see below).
 #
-# Two earlier, WRONG fixes for the initial RAT ("UNAPPROVED" license-header
-# counters) failure, both reverted -- recorded so they aren't tried again:
+# Deliberately NOT solved with .dockerignore, which was tried first and
+# reverted: .dockerignore excludes a path from the WHOLE build context, but
+# the runtime stage below also needs `docker/scripts/*.sh` via its own COPY
+# -- excluding docker/ from the context broke that COPY instead
+# ("lstat /docker/scripts: no such file or directory"). Deleting it here,
+# inside the builder stage only, leaves the original context (and the
+# runtime stage's own COPY from it) untouched.
+#
+# Three earlier, WRONG fixes for the RAT failure, all reverted -- recorded
+# so they aren't tried again:
 #   1. `-Pquick` skipped RAT, but that profile also silently swaps
 #      openmeetings-server's assembly descriptor to quick.xml, whose only
 #      <format> is a bare directory -- no tar.gz at all. BUILD SUCCESS, no
@@ -32,14 +46,17 @@ COPY . .
 #      pom.xml), so the resulting tarball had no bin/catalina.sh at all
 #      ("sudo: /opt/openmeetings/bin/catalina.sh: command not found" at
 #      runtime).
-# The RAT failure was never actually caused by a plain OM checkout -- it was
-# THIS Dockerfile's own `docker/` directory (no Apache license headers)
-# being swept into the build context by `COPY . .` and scanned along with
-# real source. Fixed at the actual source with .dockerignore (excludes
-# docker/, .git/, target/), so the plain default build (no property
-# overrides at all) now passes RAT on its own and produces a complete,
-# correctly-shaped tarball. The full test suite can still be run separately
-# (mvn test) when actually validating a patch, not on every rebuild.
+#   3. A .dockerignore excluding docker/ -- fixed RAT, but the very next
+#      build then flagged .dockerignore ITSELF as the one remaining
+#      unapproved file (it doesn't exclude itself from COPY), and once that
+#      was fixed too, excluding docker/ from the whole context broke the
+#      runtime stage's own COPY of docker/scripts/*.sh (see above) -- three
+#      cascading bugs from one mechanism, replaced with the simpler
+#      per-stage `rm` below.
+RUN rm -rf docker
+# -PallModules matches this project's own documented build command (README.md).
+# The full test suite can still be run separately (mvn test) when actually
+# validating a patch, not on every rebuild.
 #
 # Cache-mount the local Maven repo -- without it, every rebuild (including one
 # that only changes a single Java file to test a patch) re-downloads this
