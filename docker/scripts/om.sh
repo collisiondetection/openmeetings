@@ -28,7 +28,18 @@ if [ "${OM_TYPE}" == "min" ]; then
 			sed -i "s|localhost:1433;databaseName=openmeetings|${OM_DB_HOST}:${OM_DB_PORT};databaseName=${OM_DB_NAME}|g" ${DB_CFG_HOME}/persistence.xml
 		;;
 		mysql)
-			sed -i "s|localhost:3306/openmeetings?|${OM_DB_HOST}:${OM_DB_PORT}/${OM_DB_NAME}?serverTimezone=${SERVER_TZ}\&amp;|g" ${DB_CFG_HOME}/persistence.xml
+			# allowPublicKeyRetrieval=true added here (not in the upstream script):
+			# useSSL=false is already fixed in the shipped persistence.xml template,
+			# and MySQL 8's default caching_sha2_password auth plugin needs either
+			# TLS or this flag to hand the client its RSA public key -- without it,
+			# the webapp's whole Wicket filter fails to start with "Public Key
+			# Retrieval is not allowed", which surfaces in Tomcat's own log as just
+			# "One or more Filters failed to start" (real cause only visible in
+			# logs/openmeetings.log). The all-in-one (OM_TYPE=all) install path in
+			# om_install.sh already patches this same flag in for its own local
+			# MySQL setup -- this closes the identical gap for the external-DB
+			# (min) path, which had no equivalent fix.
+			sed -i "s|localhost:3306/openmeetings?|${OM_DB_HOST}:${OM_DB_PORT}/${OM_DB_NAME}?serverTimezone=${SERVER_TZ}\&amp;allowPublicKeyRetrieval=true\&amp;|g" ${DB_CFG_HOME}/persistence.xml
 		;;
 		postgresql)
 			sed -i "s|localhost:5432/openmeetings|${OM_DB_HOST}:${OM_DB_PORT}/${OM_DB_NAME}|g" ${DB_CFG_HOME}/persistence.xml
