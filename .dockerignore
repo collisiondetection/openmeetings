@@ -8,6 +8,11 @@
 # longer needs to be touched at all (see docker/Dockerfile's own comment on
 # why that property also has to skip Tomcat-unpacking as an unwanted side
 # effect).
+#
+# Do NOT add .git/ here -- buildnumber-maven-plugin (bound to the root
+# pom.xml, runs before RAT) reads the current commit via `git log`, and
+# fails the whole build outright ("not a git repository") without it.
+# Tried once; broke the build a different way. RAT's own default excludes
+# already handle .git on their own -- it was never the actual problem.
 docker/
-.git/
 **/target/
