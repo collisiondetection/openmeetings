@@ -27,6 +27,8 @@ import java.io.ByteArrayInputStream;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import javax.imageio.ImageIO;
@@ -94,6 +96,14 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 @Path("/wb")
 public class WbWebService extends BaseWebService {
 	private static final Logger log = LoggerFactory.getLogger(WbWebService.class);
+
+	// Loopback origin for WbRecordingManager.exportAssets() to resolve a
+	// context-relative asset src against -- this runs inside the same JVM/
+	// container as Tomcat itself, so this is never an external hop. 5080 is
+	// this project's own established OM_TYPE=min convention (see
+	// docker-compose.om-patch-dev.yml / production's om_init.sh), not
+	// something OM exposes as a queryable "my own port" property.
+	private static final String OM_SELF_BASE_URL = "http://localhost:5080/openmeetings";
 
 	@Inject
 	private IWhiteboardManager wbManager;
@@ -345,6 +355,16 @@ public class WbWebService extends BaseWebService {
 		log.debug("[stopRecording] room id {}", id);
 		return performCall(sid, User.Right.SOAP, sd -> {
 			try {
+				// Export while still ACTIVE (needs the open session to append the
+				// manifest line) and while the room is still live (needs its
+				// ruid-scoped asset URLs to still resolve) -- both true right up
+				// until stop() closes the file below, neither guaranteed after.
+				Whiteboards wbs = wbManager.get(id);
+				List<JSONObject> items = new ArrayList<>();
+				for (Whiteboard board : wbs.getWhiteboards().values()) {
+					items.addAll(board.list());
+				}
+				WbRecordingManager.exportAssets(id, items, OM_SELF_BASE_URL);
 				WbRecordingManager.stop(id);
 				return new ServiceResult("Stopped", Type.SUCCESS);
 			} catch (Exception e) {

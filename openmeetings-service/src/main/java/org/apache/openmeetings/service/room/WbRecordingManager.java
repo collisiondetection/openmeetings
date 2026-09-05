@@ -20,12 +20,22 @@ package org.apache.openmeetings.service.room;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.http.HttpEntity;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.apache.openmeetings.util.NullStringer;
 import org.apache.openmeetings.util.OmFileHelper;
 import org.slf4j.Logger;
@@ -108,6 +118,109 @@ public final class WbRecordingManager {
 			session.writer.close();
 		}
 		log.info("Whiteboard recording stopped for room {}: {}", roomId, session.file.getAbsolutePath());
+	}
+
+	/**
+	 * Exports any room/session-scoped file asset referenced by the room's
+	 * current board items (uploaded images/PDF pages/video posters -- anything
+	 * that went through WbWebSocketHelper.sendWbFile/addFileUrl, NOT built-in
+	 * clipart, which already uses a permanent static path) to durable local
+	 * files alongside the JSONL log, and appends a manifest line mapping each
+	 * object's uid to its exported path.
+	 *
+	 * Must run while the room is still live: addFileUrl() builds these URLs
+	 * with the room's current Whiteboards session uid (ruid) baked in via
+	 * Wicket's own RequestCycle-bound URL rendering, which this class has no
+	 * access to (it isn't a Wicket request) and doesn't need -- by the time an
+	 * event reaches record(), the URL is already a plain, fully-resolved
+	 * string. Fetching an already-built URL is just HTTP; only building a NEW
+	 * one needs Wicket. Once the room rotates or this session's Whiteboards
+	 * entry is evicted, that ruid stops resolving -- this is the one window
+	 * where it's guaranteed to still work, which is why this runs at stop(),
+	 * not later.
+	 *
+	 * @param roomId room being stopped
+	 * @param items current board objects (e.g. Whiteboard.list() per board)
+	 * @param selfBaseUrl this OM instance's own origin, e.g. "http://localhost:5080" --
+	 *                     used only when a found src is context-relative, not absolute.
+	 */
+	public static void exportAssets(Long roomId, List<JSONObject> items, String selfBaseUrl) {
+		Session session = ACTIVE.get(roomId);
+		if (session == null || items == null || items.isEmpty()) {
+			return;
+		}
+		File assetsDir = new File(OmFileHelper.getStreamsSubDir(roomId), "assets");
+		if (!assetsDir.exists() && !assetsDir.mkdirs()) {
+			log.warn("Could not create assets dir {}", assetsDir.getAbsolutePath());
+			return;
+		}
+		markWorldTraversable(assetsDir);
+
+		Map<String, String> manifest = new HashMap<>();
+		RequestConfig timeout = RequestConfig.custom()
+				.setConnectTimeout(10_000).setSocketTimeout(10_000).build();
+		try (CloseableHttpClient client = HttpClients.custom().setDefaultRequestConfig(timeout).build()) {
+			for (JSONObject item : items) {
+				String uid = item.optString("uid", null);
+				String src = firstNonEmpty(item.optString("src", null), item.optString("_src_und", null));
+				if (uid == null || src == null) {
+					continue;
+				}
+				String url = src.startsWith("http") ? src : selfBaseUrl + (src.startsWith("/") ? src : "/" + src);
+				try (CloseableHttpResponse resp = client.execute(new HttpGet(url))) {
+					int status = resp.getStatusLine().getStatusCode();
+					if (status != 200) {
+						log.warn("Asset export got HTTP {} for uid {} url {}", status, uid, url);
+						continue;
+					}
+					HttpEntity entity = resp.getEntity();
+					String contentType = entity.getContentType() != null ? entity.getContentType().getValue() : "";
+					File dest = new File(assetsDir, uid + "." + extensionFor(contentType));
+					try (InputStream in = entity.getContent()) {
+						Files.copy(in, dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
+					}
+					markWorldReadable(dest);
+					manifest.put(uid, "assets/" + dest.getName());
+				} catch (Exception e) {
+					log.error("Failed to export whiteboard asset for room {}, uid {}", roomId, uid, e);
+				}
+			}
+		} catch (IOException e) {
+			log.error("Failed to export whiteboard assets for room {}", roomId, e);
+			return;
+		}
+		if (!manifest.isEmpty()) {
+			JSONObject manifestJson = new JSONObject();
+			for (Map.Entry<String, String> e : manifest.entrySet()) {
+				manifestJson.put(e.getKey(), e.getValue());
+			}
+			try {
+				writeLine(session, new JSONObject()
+						.put("type", "assets")
+						.put("ts", System.currentTimeMillis())
+						.put("manifest", manifestJson));
+			} catch (IOException e) {
+				log.error("Failed to write asset manifest for room {}", roomId, e);
+			}
+			log.info("Exported {} whiteboard asset(s) for room {}", manifest.size(), roomId);
+		}
+	}
+
+	private static String firstNonEmpty(String a, String b) {
+		return (a != null && !a.isEmpty()) ? a : b;
+	}
+
+	private static String extensionFor(String contentType) {
+		if (contentType.contains("png")) {
+			return "png";
+		} else if (contentType.contains("jpeg") || contentType.contains("jpg")) {
+			return "jpg";
+		} else if (contentType.contains("pdf")) {
+			return "pdf";
+		} else if (contentType.contains("video")) {
+			return "mp4";
+		}
+		return "bin";
 	}
 
 	public static void record(Long roomId, String func, JSONObject param) {
