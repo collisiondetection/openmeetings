@@ -20,6 +20,8 @@ package org.apache.openmeetings.webservice;
 
 import static org.apache.openmeetings.webservice.Constants.TNS;
 
+import java.io.File;
+
 import jakarta.inject.Inject;
 import jakarta.jws.WebMethod;
 import jakarta.jws.WebParam;
@@ -36,6 +38,7 @@ import org.apache.openmeetings.db.dto.basic.ServiceResult;
 import org.apache.openmeetings.db.dto.basic.ServiceResult.Type;
 import org.apache.openmeetings.db.entity.user.User;
 import org.apache.openmeetings.db.manager.ISingleStreamRecordingManager;
+import org.apache.openmeetings.service.room.SingleStreamConversionSubmitter;
 import org.apache.openmeetings.webservice.error.ServiceException;
 import org.apache.openmeetings.webservice.schema.ServiceResultWrapper;
 import org.slf4j.Logger;
@@ -53,9 +56,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 /**
  * Records ONE participant's own stream, independent of the room's normal
  * Record button -- see {@link ISingleStreamRecordingManager}. Not part of
- * OM's normal recording-registration pipeline: the caller (a Moodle plugin
- * batch job, not OM) is responsible for locating and converting the raw
- * chunk this produces.
+ * OM's normal recording-registration pipeline (no {@code Recording}/
+ * {@code RecordingChunkDao} row is ever created) -- stop() converts the raw
+ * chunk itself via {@link SingleStreamConversionSubmitter} and leaves a
+ * finished mp4 at a predictable path for the caller (a Moodle plugin batch
+ * job) to discover.
  */
 @Service("streamRecordingWebService")
 @WebService(serviceName="org.apache.openmeetings.webservice.StreamRecordingWebService", targetNamespace = TNS)
@@ -68,6 +73,8 @@ public class StreamRecordingWebService extends BaseWebService {
 
 	@Inject
 	private ISingleStreamRecordingManager recManager;
+	@Inject
+	private SingleStreamConversionSubmitter converter;
 
 	/**
 	 * @param sid - The SID of the User. This SID must be marked as Loggedin
@@ -142,6 +149,18 @@ public class StreamRecordingWebService extends BaseWebService {
 		log.debug("[stopSingle] room id {}, requestId {}", roomId, requestId);
 		return performCall(sid, User.Right.SOAP, sd -> {
 			recManager.stopSingle(roomId, requestId);
+			// Synchronous, matching WbWebService.stopRecording()'s own style --
+			// by now stopSingle()'s stopAndWait has already confirmed the raw
+			// chunk is finalized on disk, so there's nothing to poll for.
+			// A failed conversion is logged by the submitter itself and
+			// reported here as an error result; the raw chunk is left in
+			// place either way; a future commit doesn't need this call site
+			// to change when it becomes an async Batch submission instead --
+			// only what happens inside converter.convert() does.
+			File mp4 = converter.convert(roomId, requestId);
+			if (mp4 == null) {
+				return new ServiceResult("Recording stopped but conversion failed -- see server logs", Type.ERROR);
+			}
 			return new ServiceResult("", Type.SUCCESS);
 		});
 	}
