@@ -106,6 +106,13 @@ public class SingleStreamConversionSubmitter {
 				, "-ar", String.valueOf(getAudioRate())
 				, "-b:a", getAudioBitrate()
 				, "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"
+				// ffmpeg picks its output container by reading the OUTPUT
+				// filename's extension -- ".mp4.part" reads as the unknown
+				// extension ".part" and fails outright ("Unable to choose an
+				// output format"), found live. Naming the format explicitly
+				// keeps the .part suffix (needed for the atomic rename below)
+				// without depending on ffmpeg's own extension sniffing.
+				, "-f", "mp4"
 				));
 		argv.add(partMp4.getAbsolutePath());
 
