@@ -50,6 +50,7 @@
 			<ref bean="netTestWebService"/> <!-- JaxRs only -->
 			<ref bean="recordWebService"/>
 			<ref bean="roomWebService"/>
+			<ref bean="streamRecordingWebService"/> <!-- JaxRs only -->
 			<ref bean="userWebService"/>
 			<ref bean="wbWebService"/>
 		</jaxrs:serviceBeans>
