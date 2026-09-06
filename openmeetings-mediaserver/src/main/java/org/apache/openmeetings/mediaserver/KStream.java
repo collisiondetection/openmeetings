@@ -107,6 +107,12 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 	private boolean hasVideo;
 	private boolean hasScreen;
 	private boolean sipClient;
+	// Single-participant recording: a second, independent RecorderEndpoint on
+	// the same outgoingMedia, deliberately never touching recorder/chunkId/
+	// kRoom.getRecordingId() above -- this must work whether or not the room's
+	// own Record button has ever been pressed, so it can't share that state.
+	private RecorderEndpoint singleRecorder;
+	private String singleRecordRequestId;
 
 	public KStream(final StreamDesc sd, KRoom kRoom) {
 		super(sd.getSid(), sd.getUid());
@@ -382,6 +388,116 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 		stopRecorder(true, () -> {});
 	}
 
+	/**
+	 * Records ONLY this stream, on a second, independent RecorderEndpoint --
+	 * deliberately never touches {@code recorder}/{@code chunkId}/
+	 * {@code chunkDao}, so it works whether or not the room's own Record
+	 * button has ever been pressed, and can never collide with a concurrent
+	 * whole-room recording of the same stream. Not registered with OM's
+	 * normal recording pipeline at all; the caller is responsible for
+	 * locating and converting the resulting chunk.
+	 *
+	 * @param requestId caller-supplied id, embedded in the chunk filename so
+	 *                  the caller can locate it without any lookup back into
+	 *                  this class
+	 * @return false if refused outright (no media, no video, or a
+	 *         single-stream recording is already in progress on this
+	 *         stream) -- the caller should treat this the same as any other
+	 *         "could not start" case and not retry immediately
+	 */
+	public synchronized boolean startSingleRecord(String requestId) {
+		log.debug("startSingleRecord outMedia OK ? {}, hasVideo ? {}", outgoingMedia != null, hasVideo);
+		if (outgoingMedia == null || singleRecorder != null || !hasVideo) {
+			return false;
+		}
+		final String chunkUid = "single_" + requestId;
+		singleRecorder = createRecorderEndpoint(pipeline, getRecUri(getRecordingChunk(getRoomId(), chunkUid)), profile);
+		setTags(singleRecorder, uid);
+		switch (profile) {
+			case WEBM:
+				outgoingMedia.connect(singleRecorder, MediaType.AUDIO);
+				outgoingMedia.connect(singleRecorder, MediaType.VIDEO);
+				break;
+			case WEBM_VIDEO_ONLY:
+				outgoingMedia.connect(singleRecorder, MediaType.VIDEO);
+				break;
+			case WEBM_AUDIO_ONLY:
+			default:
+				outgoingMedia.connect(singleRecorder, MediaType.AUDIO);
+				break;
+		}
+		singleRecordRequestId = requestId;
+		singleRecorder.record(new Continuation<Void>() {
+			@Override
+			public void onSuccess(Void result) throws Exception {
+				log.info("Single-stream recording started successfully, uid {}, requestId {}", KStream.this.uid, requestId);
+			}
+
+			@Override
+			public void onError(Throwable cause) throws Exception {
+				log.error("Failed to start single-stream recording, uid {}, requestId {}", KStream.this.uid, requestId, cause);
+			}
+		});
+		return true;
+	}
+
+	/**
+	 * Stops and finalizes the single-stream recording started by
+	 * {@link #startSingleRecord(String)}, if any -- a no-op otherwise (e.g.
+	 * the participant already disconnected, which independently calls this
+	 * via {@link #release(boolean)} below). Blocks until Kurento confirms
+	 * the file is finalized on disk, matching {@code stopRecord()}'s own use
+	 * of {@code stopAndWait} -- callers that need to immediately hand the
+	 * output off for conversion rely on this.
+	 */
+	public synchronized void stopSingleRecord() {
+		if (singleRecorder == null) {
+			return;
+		}
+		final RecorderEndpoint toStop = singleRecorder;
+		final String requestId = singleRecordRequestId;
+		singleRecorder = null;
+		singleRecordRequestId = null;
+		toStop.stopAndWait(new Continuation<Void>() {
+			@Override
+			public void onSuccess(Void result) throws Exception {
+				log.trace("PARTICIPANT {}: Single-stream recording stopped, requestId {}", KStream.this.uid, requestId);
+				releaseSingleRecorder(toStop);
+			}
+
+			@Override
+			public void onError(Throwable cause) throws Exception {
+				log.warn("PARTICIPANT {}: Could not stop single-stream recording, requestId {}", KStream.this.uid, requestId, cause);
+				releaseSingleRecorder(toStop);
+			}
+		});
+	}
+
+	private void releaseSingleRecorder(RecorderEndpoint toStop) {
+		outgoingMedia.disconnect(toStop, new Continuation<Void>() {
+			@Override
+			public void onSuccess(Void result) throws Exception {
+				log.trace("PARTICIPANT {}: Single-stream recorder disconnected successfully", KStream.this.uid);
+			}
+
+			@Override
+			public void onError(Throwable cause) throws Exception {
+				log.warn("PARTICIPANT {}: Could not disconnect single-stream recorder", KStream.this.uid, cause);
+			}
+		});
+		toStop.release(new Continuation<Void>() {
+			@Override
+			public void onSuccess(Void result) throws Exception {
+				log.trace("PARTICIPANT {}: Single-stream recorder released successfully", KStream.this.uid);
+			}
+
+			@Override
+			public void onError(Throwable cause) throws Exception {
+				log.warn("PARTICIPANT {}: Could not release single-stream recorder", KStream.this.uid, cause);
+			}
+		});
+	}
+
 	public void remove(final Client c) {
 		WebRtcEndpoint point = listeners.remove(c.getUid());
 		if (point != null) {
@@ -433,6 +549,11 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 	@Override
 	public void release(boolean remove) {
 		if (outgoingMedia != null) {
+			// Must run before outgoingMedia is released below, and before a
+			// disconnecting participant's stream disappears out from under an
+			// in-progress single-stream recording -- otherwise the recorder
+			// leaks and the output file is left unfinalized.
+			stopSingleRecord();
 			releaseListeners();
 			stopRecorder(false, () -> {
 				releaseRtp();
