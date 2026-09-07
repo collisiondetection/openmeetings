@@ -18,6 +18,8 @@
  */
 package org.apache.openmeetings.db.manager;
 
+import org.apache.openmeetings.db.dto.record.SingleStreamRecordingStart;
+
 /**
  * Records ONE participant's own stream in a room, independent of the room's
  * normal Record button -- interface lives here (openmeetings-db) so
@@ -31,8 +33,10 @@ public interface ISingleStreamRecordingManager {
 	 * @param roomId room to search for the target participant in
 	 * @param externalUserId the Moodle user id to target, matched against
 	 *                       {@code Client.getUser().getExternalId()}
-	 * @return a caller-supplied-free, server-generated request id identifying
-	 *         this recording, needed to call {@link #stopSingle(Long, String)}
+	 * @return a server-generated request id identifying this recording
+	 *         (needed to call {@link #stopSingle(Long, String)}), together
+	 *         with the OM server's own wall-clock instant the recording was
+	 *         activated -- see {@link SingleStreamRecordingStart}
 	 * @throws IllegalStateException with a descriptive, caller-facing message
 	 *                               for every refusal case (media server not
 	 *                               connected, no/ambiguous matching
@@ -40,7 +44,7 @@ public interface ISingleStreamRecordingManager {
 	 *                               stream, no video) -- never guesses on
 	 *                               ambiguity
 	 */
-	String startSingle(Long roomId, String externalUserId);
+	SingleStreamRecordingStart startSingle(Long roomId, String externalUserId);
 
 	/**
 	 * Idempotent: if the recording already auto-stopped (e.g. the participant

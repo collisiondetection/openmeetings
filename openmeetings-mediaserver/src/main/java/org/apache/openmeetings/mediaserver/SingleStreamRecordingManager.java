@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.openmeetings.db.dto.record.SingleStreamRecordingStart;
 import org.apache.openmeetings.db.entity.basic.Client;
 import org.apache.openmeetings.db.entity.basic.Client.Activity;
 import org.apache.openmeetings.db.entity.basic.WebcamStreamDesc;
@@ -70,7 +71,7 @@ public class SingleStreamRecordingManager implements ISingleStreamRecordingManag
 	private final Map<String, String> streamUidByRequestId = new ConcurrentHashMap<>();
 
 	@Override
-	public String startSingle(Long roomId, String externalUserId) {
+	public SingleStreamRecordingStart startSingle(Long roomId, String externalUserId) {
 		if (!kHandler.isConnected()) {
 			throw new IllegalStateException("Media server is not connected");
 		}
@@ -104,8 +105,18 @@ public class SingleStreamRecordingManager implements ISingleStreamRecordingManag
 			throw new IllegalStateException("Stream " + sd.getUid() + " refused to start single-stream recording (already recording, or no media) in room " + roomId);
 		}
 		streamUidByRequestId.put(requestId, sd.getUid());
-		log.info("Started single-stream recording, room {}, externalUserId {}, requestId {}", roomId, externalUserId, requestId);
-		return requestId;
+		// startSingleRecord() sets this synchronously, strictly before it
+		// returns true, and KStream never clears it back to null afterwards
+		// (see that field's own javadoc for why) -- null here should be
+		// unreachable, but fall back rather than propagate an NPE up into the
+		// webservice layer if some future refactor ever breaks that invariant.
+		Long startTime = stream.getSingleRecordStartTime();
+		if (startTime == null) {
+			log.warn("Single-stream recording started but no start time was recorded, room {}, requestId {} -- falling back to now", roomId, requestId);
+			startTime = System.currentTimeMillis();
+		}
+		log.info("Started single-stream recording, room {}, externalUserId {}, requestId {}, startTime {}", roomId, externalUserId, requestId, startTime);
+		return new SingleStreamRecordingStart(requestId, startTime);
 	}
 
 	@Override

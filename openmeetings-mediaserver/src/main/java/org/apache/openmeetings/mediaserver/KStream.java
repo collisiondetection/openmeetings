@@ -113,6 +113,18 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 	// own Record button has ever been pressed, so it can't share that state.
 	private RecorderEndpoint singleRecorder;
 	private String singleRecordRequestId;
+	// The OM server's own wall-clock instant (epoch millis) the most recently
+	// started single-stream recording was activated -- set inside
+	// startSingleRecord(), read by SingleStreamRecordingManager immediately
+	// after a successful start so it can hand the instant back to the REST
+	// caller. Deliberately NOT cleared in stopSingleRecord()/on release: the
+	// only reader looks at it right after ITS OWN startSingleRecord() call
+	// just returned true, so leaving the previous value in place after a stop
+	// is harmless (a genuinely stale value is simply never read), whereas
+	// nulling it here would open a narrow race -- a concurrent stopSingleRecord()
+	// landing between startSingleRecord() returning and the manager reading
+	// this getter -- that would otherwise turn into an NPE at the call site.
+	private Long singleRecordStartTime;
 
 	public KStream(final StreamDesc sd, KRoom kRoom) {
 		super(sd.getSid(), sd.getUid());
@@ -427,6 +439,20 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 				break;
 		}
 		singleRecordRequestId = requestId;
+		// Captured here, synchronously, rather than in record()'s own
+		// Continuation.onSuccess below (which fires async, well after this
+		// method must already have returned to a caller that has to answer
+		// an HTTP request in the same call) or via a Kurento
+		// addRecordingListener callback (the pattern startRecord() uses for
+		// the whole-room case's RecordingChunk.start -- also async, and only
+		// fine there because nothing is waiting on it). This is therefore
+		// the OM server's own instant it ISSUED the activation command, not
+		// Kurento's later confirmation that media is genuinely flowing --
+		// close enough for the caller's actual purpose (correlating against
+		// the whiteboard recording log's own System.currentTimeMillis() "ts"
+		// values, see WbRecordingManager) without turning this method into a
+		// blocking call.
+		singleRecordStartTime = System.currentTimeMillis();
 		singleRecorder.record(new Continuation<Void>() {
 			@Override
 			public void onSuccess(Void result) throws Exception {
@@ -496,6 +522,19 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 				log.warn("PARTICIPANT {}: Could not release single-stream recorder", KStream.this.uid, cause);
 			}
 		});
+	}
+
+	/**
+	 * @return the OM server's own wall-clock instant (epoch millis, see
+	 * {@link #singleRecordStartTime}'s own javadoc) the most recently started
+	 * single-stream recording was activated, or {@code null} if
+	 * {@link #startSingleRecord(String)} has never succeeded on this stream.
+	 * Deliberately a plain, unsynchronized getter -- matching {@link #getRecorder()}/
+	 * {@link #getChunkId()} below, not every accessor on this class takes the
+	 * monitor just to read a field.
+	 */
+	public Long getSingleRecordStartTime() {
+		return singleRecordStartTime;
 	}
 
 	public void remove(final Client c) {

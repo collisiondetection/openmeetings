@@ -36,11 +36,14 @@ import jakarta.ws.rs.core.MediaType;
 import org.apache.cxf.feature.Features;
 import org.apache.openmeetings.db.dto.basic.ServiceResult;
 import org.apache.openmeetings.db.dto.basic.ServiceResult.Type;
+import org.apache.openmeetings.db.dto.record.SingleStreamRecordingStart;
+import org.apache.openmeetings.db.dto.record.SingleStreamRecordingStartResult;
 import org.apache.openmeetings.db.entity.user.User;
 import org.apache.openmeetings.db.manager.ISingleStreamRecordingManager;
 import org.apache.openmeetings.service.room.SingleStreamConversionSubmitter;
 import org.apache.openmeetings.webservice.error.ServiceException;
 import org.apache.openmeetings.webservice.schema.ServiceResultWrapper;
+import org.apache.openmeetings.webservice.schema.SingleStreamRecordingStartResultWrapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,6 +64,13 @@ import io.swagger.v3.oas.annotations.tags.Tag;
  * chunk itself via {@link SingleStreamConversionSubmitter} and leaves a
  * finished mp4 at a predictable path for the caller (a Moodle plugin batch
  * job) to discover.
+ *
+ * start()'s success response also carries the OM server's own wall-clock
+ * instant the recording was activated ({@link SingleStreamRecordingStartResult#getStartTime()}),
+ * so a caller can synchronize this recording against a separately-captured
+ * whiteboard recording log (see {@code WbRecordingManager} in
+ * openmeetings-service), whose own event timestamps are in that same clock
+ * domain.
  */
 @Service("streamRecordingWebService")
 @WebService(serviceName="org.apache.openmeetings.webservice.StreamRecordingWebService", targetNamespace = TNS)
@@ -82,7 +92,9 @@ public class StreamRecordingWebService extends BaseWebService {
 	 * @param externalUserId - the Moodle user id to target (matched against
 	 *                       the participant's own externalId)
 	 * @return - serviceResult object; on success, message holds the request id
-	 *         needed to call stopSingle later
+	 *         needed to call stopSingle later, and startTime holds the OM
+	 *         server's own wall-clock instant (epoch milliseconds) the
+	 *         recording was activated -- see {@link SingleStreamRecordingStartResult}
 	 * @throws {@link ServiceException} in case of any errors
 	 */
 	@WebMethod
@@ -91,12 +103,12 @@ public class StreamRecordingWebService extends BaseWebService {
 	@Operation(
 			description = "Starts recording ONE participant's own stream, independent of the room's normal Record button",
 			responses = {
-					@ApiResponse(responseCode = "200", description = "serviceResult object with the result",
-							content = @Content(schema = @Schema(implementation = ServiceResultWrapper.class))),
+					@ApiResponse(responseCode = "200", description = "serviceResult object with the result -- on success, message holds the request id needed to call stop, and startTime holds the OM server's own wall-clock instant (epoch milliseconds) the recording was activated",
+							content = @Content(schema = @Schema(implementation = SingleStreamRecordingStartResultWrapper.class))),
 					@ApiResponse(responseCode = "500", description = "Error in case of invalid credentials or server error")
 			}
 		)
-	public ServiceResult startSingle(
+	public SingleStreamRecordingStartResult startSingle(
 			@Parameter(required = true, description = "The SID of the User. This SID must be marked as Loggedin") @WebParam(name="sid") @QueryParam("sid") String sid
 			, @Parameter(required = true, description = "id of the room the target participant is currently in") @WebParam(name="roomid") @PathParam("roomid") long roomId
 			, @Parameter(required = true, description = "the Moodle user id to target") @WebParam(name="externaluserid") @PathParam("externaluserid") String externalUserId
@@ -105,16 +117,17 @@ public class StreamRecordingWebService extends BaseWebService {
 		log.debug("[startSingle] room id {}, externalUserId {}", roomId, externalUserId);
 		return performCall(sid, User.Right.SOAP, sd -> {
 			try {
-				String requestId = recManager.startSingle(roomId, externalUserId);
-				return new ServiceResult(requestId, Type.SUCCESS);
+				SingleStreamRecordingStart started = recManager.startSingle(roomId, externalUserId);
+				return new SingleStreamRecordingStartResult(started.getRequestId(), Type.SUCCESS, started.getStartTime());
 			} catch (IllegalStateException e) {
 				// Every refusal from the manager is a descriptive message meant
 				// for the caller (e.g. a Moodle scheduled task deciding whether
-				// to retry) -- returned as a normal ServiceResult, not left to
+				// to retry) -- returned as a normal result, not left to
 				// propagate into performCall's own generic catch, which would
-				// wrap it as an opaque thrown ServiceException instead.
+				// wrap it as an opaque thrown ServiceException instead. No
+				// startTime: nothing started, so there's no instant to report.
 				log.info("[startSingle] refused: {}", e.getMessage());
-				return new ServiceResult(e.getMessage(), Type.ERROR);
+				return new SingleStreamRecordingStartResult(e.getMessage(), Type.ERROR, null);
 			}
 		});
 	}
