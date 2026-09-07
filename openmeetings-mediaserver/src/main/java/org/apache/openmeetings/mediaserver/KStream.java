@@ -471,10 +471,24 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 	 * Stops and finalizes the single-stream recording started by
 	 * {@link #startSingleRecord(String)}, if any -- a no-op otherwise (e.g.
 	 * the participant already disconnected, which independently calls this
-	 * via {@link #release(boolean)} below). Blocks until Kurento confirms
-	 * the file is finalized on disk, matching {@code stopRecord()}'s own use
-	 * of {@code stopAndWait} -- callers that need to immediately hand the
-	 * output off for conversion rely on this.
+	 * via {@link #release(boolean)} below).
+	 *
+	 * <p>Despite the name, {@code stopAndWait} does NOT block the calling
+	 * thread -- verified live (2026-09-07): its {@link Continuation} fires
+	 * asynchronously, on a separate Kurento JSON-RPC client thread (observed
+	 * as {@code ventExec-e2-tNN} against a caller thread named
+	 * {@code nio-5443-execN}), and can arrive several seconds after this
+	 * method has already returned -- Kurento's own server-side EOS/mux
+	 * finalization is what {@code stopAndWait} actually waits for, on the
+	 * MEDIA SERVER side; the JAVA CLIENT call issuing it is fire-and-forget.
+	 * An earlier version of this comment claimed the opposite ("matching
+	 * {@code stopRecord()}'s own use of {@code stopAndWait}"), which is why
+	 * {@link #releaseSingleRecorder(BaseRtpEndpoint, RecorderEndpoint)}
+	 * below takes its own {@code outgoingMedia} snapshot rather than
+	 * re-reading the field: {@link #release(boolean)} can null the real
+	 * {@code outgoingMedia} field (via its own, independent
+	 * {@code stopRecorder} completion) while this async completion is still
+	 * pending, and reading the field at that later point used to NPE.
 	 */
 	public synchronized void stopSingleRecord() {
 		if (singleRecorder == null) {
@@ -482,35 +496,56 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 		}
 		final RecorderEndpoint toStop = singleRecorder;
 		final String requestId = singleRecordRequestId;
+		// Captured now, alongside toStop, for the exact same reason toStop
+		// itself is captured rather than re-read from the singleRecorder
+		// field later: by the time the async continuation below actually
+		// runs, release(boolean) may already have nulled the real
+		// outgoingMedia field out from under it (see this method's own
+		// javadoc, and the NPE this fixed).
+		final BaseRtpEndpoint media = outgoingMedia;
 		singleRecorder = null;
 		singleRecordRequestId = null;
 		toStop.stopAndWait(new Continuation<Void>() {
 			@Override
 			public void onSuccess(Void result) throws Exception {
 				log.trace("PARTICIPANT {}: Single-stream recording stopped, requestId {}", KStream.this.uid, requestId);
-				releaseSingleRecorder(toStop);
+				releaseSingleRecorder(media, toStop);
 			}
 
 			@Override
 			public void onError(Throwable cause) throws Exception {
 				log.warn("PARTICIPANT {}: Could not stop single-stream recording, requestId {}", KStream.this.uid, requestId, cause);
-				releaseSingleRecorder(toStop);
+				releaseSingleRecorder(media, toStop);
 			}
 		});
 	}
 
-	private void releaseSingleRecorder(RecorderEndpoint toStop) {
-		outgoingMedia.disconnect(toStop, new Continuation<Void>() {
-			@Override
-			public void onSuccess(Void result) throws Exception {
-				log.trace("PARTICIPANT {}: Single-stream recorder disconnected successfully", KStream.this.uid);
-			}
+	/**
+	 * @param media the {@code outgoingMedia} that was live when
+	 *              {@link #stopSingleRecord()} issued the stop -- a snapshot,
+	 *              NOT necessarily the same object the {@code outgoingMedia}
+	 *              field holds by the time this runs (see
+	 *              {@link #stopSingleRecord()}'s javadoc). May be {@code null}
+	 *              if the participant's whole stream was already torn down
+	 *              before this fired; {@code toStop} is still released in
+	 *              that case, just never disconnected from a now-gone parent.
+	 */
+	private void releaseSingleRecorder(BaseRtpEndpoint media, RecorderEndpoint toStop) {
+		if (media == null) {
+			log.trace("PARTICIPANT {}: outgoingMedia already gone by the time the single-stream recorder stopped -- skipping disconnect", KStream.this.uid);
+		} else {
+			media.disconnect(toStop, new Continuation<Void>() {
+				@Override
+				public void onSuccess(Void result) throws Exception {
+					log.trace("PARTICIPANT {}: Single-stream recorder disconnected successfully", KStream.this.uid);
+				}
 
-			@Override
-			public void onError(Throwable cause) throws Exception {
-				log.warn("PARTICIPANT {}: Could not disconnect single-stream recorder", KStream.this.uid, cause);
-			}
-		});
+				@Override
+				public void onError(Throwable cause) throws Exception {
+					log.warn("PARTICIPANT {}: Could not disconnect single-stream recorder", KStream.this.uid, cause);
+				}
+			});
+		}
 		toStop.release(new Continuation<Void>() {
 			@Override
 			public void onSuccess(Void result) throws Exception {
