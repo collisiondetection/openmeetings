@@ -160,8 +160,29 @@ public class SingleStreamRecordingManager implements ISingleStreamRecordingManag
 		// was issued.
 		long startNanos = System.nanoTime();
 		CompletableFuture<Boolean> completion = new CompletableFuture<>();
-		stream.stopSingleRecord(completion::complete);
 		try {
+			// Dispatched INSIDE this try, not before it: stopSingleRecord()
+			// declares no checked exceptions, so the only thing that can
+			// escape it is an unchecked RuntimeException from the Kurento
+			// client call it makes (RecorderEndpoint.stopAndWait()) --
+			// possible synchronously, e.g. if the Kurento client connection
+			// drops in the exact instant between KStream's own
+			// singleRecorder-null check and dispatching the stop. Catching
+			// that here, in the same try as the completion wait below,
+			// means a synchronous failure takes the identical fail-safe
+			// path as every asynchronous one already handled below, instead
+			// of propagating past this method entirely and surfacing to the
+			// webservice caller as a raw thrown exception (performCall's
+			// own catch-all turns anything unhandled into a ServiceException,
+			// i.e. an HTTP 500) rather than the descriptive `false` ->
+			// Type.ERROR result every other failure mode here produces. Not
+			// a double-completion risk: if stopAndWait() throws before ever
+			// registering its Continuation with Kurento, that Continuation
+			// can never fire, so `completion` is simply never completed --
+			// exactly like the TimeoutException case below, just via a
+			// different, synchronous route to the same "give up and report
+			// unsafe" outcome.
+			stream.stopSingleRecord(completion::complete);
 			boolean ok = completion.get(STOP_CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 			log.info("Stopped single-stream recording, room {}, requestId {}, confirmed {}, took {}ms", roomId, requestId, ok, (System.nanoTime() - startNanos) / 1_000_000);
 			return ok;
@@ -179,6 +200,9 @@ public class SingleStreamRecordingManager implements ISingleStreamRecordingManag
 			// failure -- kept only because CompletableFuture.get() declares
 			// this checked exception.
 			log.warn("stopSingle: unexpected error waiting for the media server to confirm the stop, room {}, requestId {}", roomId, requestId, e);
+			return false;
+		} catch (RuntimeException e) {
+			log.warn("stopSingle: stream.stopSingleRecord() threw synchronously, room {}, requestId {} -- treating as unsafe to convert", roomId, requestId, e);
 			return false;
 		}
 	}
