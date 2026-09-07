@@ -27,6 +27,9 @@ import java.io.ByteArrayInputStream;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 import javax.imageio.ImageIO;
 
@@ -48,12 +51,15 @@ import org.apache.commons.io.FileUtils;
 import org.apache.cxf.feature.Features;
 import org.apache.openmeetings.db.dto.basic.ServiceResult;
 import org.apache.openmeetings.db.dto.basic.ServiceResult.Type;
+import org.apache.openmeetings.db.dto.room.Whiteboard;
+import org.apache.openmeetings.db.dto.room.Whiteboards;
 import org.apache.openmeetings.db.entity.basic.Client;
 import org.apache.openmeetings.db.entity.room.Room;
 import org.apache.openmeetings.db.entity.room.Room.RoomElement;
 import org.apache.openmeetings.db.entity.user.User;
 import org.apache.openmeetings.db.manager.IClientManager;
 import org.apache.openmeetings.db.manager.IWhiteboardManager;
+import org.apache.openmeetings.service.room.WbRecordingManager;
 import org.apache.openmeetings.webservice.error.ServiceException;
 import org.apache.openmeetings.webservice.schema.ServiceResultWrapper;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -69,6 +75,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.github.openjson.JSONArray;
+import com.github.openjson.JSONObject;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -94,6 +101,10 @@ public class WbWebService extends BaseWebService {
 	private IWhiteboardManager wbManager;
 	@Inject
 	private IClientManager cm;
+	// fileDao itself is inherited from BaseWebService -- exportAssets() uses
+	// it (passed through) to resolve each exported object's fileId straight
+	// off disk; see that method's doc comment for why that's necessary
+	// rather than fetching the object's own broadcast URL over HTTP.
 
 	/**
 	 * This method will remove all whiteboards from given room
@@ -264,5 +275,128 @@ public class WbWebService extends BaseWebService {
 				return new ServiceResult(e.getMessage(), Type.ERROR);
 			}
 		});
+	}
+
+	private static JSONObject snapshot(Whiteboards wbs) {
+		JSONObject boards = new JSONObject();
+		for (Map.Entry<Long, Whiteboard> e : wbs.getWhiteboards().entrySet()) {
+			boards.put(String.valueOf(e.getKey()), e.getValue().toJson());
+		}
+		return new JSONObject()
+				.put("activeWb", wbs.getActiveWb())
+				.put("boards", boards);
+	}
+
+	/**
+	 * Starts persisting this room's whiteboard event stream to a JSONL log,
+	 * independent of OM's own A/V recording (see WbRecordingManager). The opening
+	 * line is a snapshot of the room's current whiteboard state.
+	 *
+	 * @param sid - The SID of the User. This SID must be marked as Loggedin
+	 * @param id - id of the room to record
+	 * @return - serviceResult object; message carries the log file path on success
+	 * @throws {@link ServiceException} in case of any errors
+	 */
+	@WebMethod
+	@GET
+	@Path("/startrecording/{id}")
+	@Operation(
+			description = "Starts persisting this room's whiteboard event stream to a JSONL log",
+			responses = {
+					@ApiResponse(responseCode = "200", description = "serviceResult object with the result",
+							content = @Content(schema = @Schema(implementation = ServiceResultWrapper.class))),
+					@ApiResponse(responseCode = "500", description = "Error in case of invalid credentials or server error")
+			}
+		)
+	public ServiceResult startRecording(
+			@Parameter(required = true, description = "The SID of the User. This SID must be marked as Loggedin") @WebParam(name="sid") @QueryParam("sid") String sid
+			, @Parameter(required = true, description = "id of the room to record") @WebParam(name="id") @PathParam("id") long id
+			) throws ServiceException
+	{
+		log.debug("[startRecording] room id {}", id);
+		return performCall(sid, User.Right.SOAP, sd -> {
+			try {
+				String path = WbRecordingManager.start(id, snapshot(wbManager.get(id)));
+				return new ServiceResult(path, Type.SUCCESS);
+			} catch (Exception e) {
+				return new ServiceResult(e.getMessage(), Type.ERROR);
+			}
+		});
+	}
+
+	/**
+	 * Stops persisting this room's whiteboard event stream.
+	 *
+	 * @param sid - The SID of the User. This SID must be marked as Loggedin
+	 * @param id - id of the room to stop recording
+	 * @return - serviceResult object with the result
+	 * @throws {@link ServiceException} in case of any errors
+	 */
+	@WebMethod
+	@GET
+	@Path("/stoprecording/{id}")
+	@Operation(
+			description = "Stops persisting this room's whiteboard event stream",
+			responses = {
+					@ApiResponse(responseCode = "200", description = "serviceResult object with the result",
+							content = @Content(schema = @Schema(implementation = ServiceResultWrapper.class))),
+					@ApiResponse(responseCode = "500", description = "Error in case of invalid credentials or server error")
+			}
+		)
+	public ServiceResult stopRecording(
+			@Parameter(required = true, description = "The SID of the User. This SID must be marked as Loggedin") @WebParam(name="sid") @QueryParam("sid") String sid
+			, @Parameter(required = true, description = "id of the room to stop recording") @WebParam(name="id") @PathParam("id") long id
+			) throws ServiceException
+	{
+		log.debug("[stopRecording] room id {}", id);
+		return performCall(sid, User.Right.SOAP, sd -> {
+			try {
+				// Export while still ACTIVE and still LIVE -- both the session's
+				// own log (covers file objects created DURING this recording) and
+				// the room's current Whiteboard.list() state (covers ones already
+				// on the board when recording STARTED, e.g. a lesson PDF attached
+				// at room creation -- the normal production case) are only
+				// guaranteed valid right up until stop() below. See
+				// WbRecordingManager.exportAssets()'s doc comment for the full
+				// story of why both sources are needed, not just one.
+				List<JSONObject> liveItems = new ArrayList<>();
+				Whiteboards wbs = wbManager.get(id);
+				for (Whiteboard board : wbs.getWhiteboards().values()) {
+					liveItems.addAll(board.list());
+				}
+				WbRecordingManager.exportAssets(id, fileDao, liveItems);
+				WbRecordingManager.stop(id);
+				return new ServiceResult("Stopped", Type.SUCCESS);
+			} catch (Exception e) {
+				return new ServiceResult(e.getMessage(), Type.ERROR);
+			}
+		});
+	}
+
+	/**
+	 * Reports whether this room's whiteboard event stream is currently being persisted.
+	 *
+	 * @param sid - The SID of the User. This SID must be marked as Loggedin
+	 * @param id - id of the room to check
+	 * @return - serviceResult object, message is "true"/"false"
+	 * @throws {@link ServiceException} in case of any errors
+	 */
+	@WebMethod
+	@GET
+	@Path("/recordingstatus/{id}")
+	@Operation(
+			description = "Reports whether this room's whiteboard event stream is currently being persisted",
+			responses = {
+					@ApiResponse(responseCode = "200", description = "serviceResult object with the result",
+							content = @Content(schema = @Schema(implementation = ServiceResultWrapper.class))),
+					@ApiResponse(responseCode = "500", description = "Error in case of invalid credentials or server error")
+			}
+		)
+	public ServiceResult recordingStatus(
+			@Parameter(required = true, description = "The SID of the User. This SID must be marked as Loggedin") @WebParam(name="sid") @QueryParam("sid") String sid
+			, @Parameter(required = true, description = "id of the room to check") @WebParam(name="id") @PathParam("id") long id
+			) throws ServiceException
+	{
+		return performCall(sid, User.Right.SOAP, sd -> new ServiceResult(String.valueOf(WbRecordingManager.isRecording(id)), Type.SUCCESS));
 	}
 }

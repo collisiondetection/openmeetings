@@ -77,8 +77,8 @@ ENV OM_VER_MAJ='9'
 ENV OM_VER_MIN='1'
 ENV OM_VER_MIC='0'
 ENV OM_VERSION="${OM_VER_MAJ}.${OM_VER_MIN}.${OM_VER_MIC}"
-LABEL vendor="Tutorship (patched Apache OpenMeetings, single-stream-recording branch)"
-LABEL version="${OM_VERSION}-singlestream"
+LABEL vendor="Tutorship (patched Apache OpenMeetings, full-recorder-replacement branch: single-stream + whiteboard recording combined)"
+LABEL version="${OM_VERSION}-fullreplace"
 LABEL maintainer=dev@tutorship.biz
 
 ENV DB_ROOT_PASS='12345'
