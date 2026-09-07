@@ -22,7 +22,11 @@ import static java.util.UUID.randomUUID;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.apache.openmeetings.db.dto.record.SingleStreamRecordingStart;
 import org.apache.openmeetings.db.entity.basic.Client;
@@ -54,6 +58,14 @@ import jakarta.inject.Singleton;
 @Named
 public class SingleStreamRecordingManager implements ISingleStreamRecordingManager {
 	private static final Logger log = LoggerFactory.getLogger(SingleStreamRecordingManager.class);
+
+	// Real, measured worst case for Kurento's own stopAndWait confirmation to
+	// land is well under this (observed up to ~4s during the investigation
+	// that scoped this class's own stop-race fix) -- this leaves genuine
+	// margin above that while still bounding how long a caller of
+	// stopSingle() (a webservice request thread) can be blocked if the
+	// media server never confirms at all, e.g. a lost connection.
+	private static final long STOP_CONFIRM_TIMEOUT_SECONDS = 15;
 
 	@Inject
 	private KurentoHandler kHandler;
@@ -120,11 +132,11 @@ public class SingleStreamRecordingManager implements ISingleStreamRecordingManag
 	}
 
 	@Override
-	public void stopSingle(Long roomId, String requestId) {
+	public boolean stopSingle(Long roomId, String requestId) {
 		String streamUid = streamUidByRequestId.remove(requestId);
 		if (streamUid == null) {
 			log.info("stopSingle: no in-progress recording for requestId {} in room {} -- already stopped or never started", requestId, roomId);
-			return;
+			return true;
 		}
 		KStream stream = processor.getByUid(streamUid);
 		if (stream == null) {
@@ -132,9 +144,42 @@ public class SingleStreamRecordingManager implements ISingleStreamRecordingManag
 			// KStream.release() -> stopSingleRecord() -- the file is already
 			// finalized, there is simply nothing left here to stop.
 			log.info("stopSingle: stream {} (requestId {}) is already gone in room {}", streamUid, requestId, roomId);
-			return;
+			return true;
 		}
-		stream.stopSingleRecord();
-		log.info("Stopped single-stream recording, room {}, requestId {}", roomId, requestId);
+		// stream.stopSingleRecord()'s own completion callback fires
+		// asynchronously -- on a separate Kurento JSON-RPC client thread,
+		// once the media server has genuinely finished finalizing the
+		// recording, NOT synchronously within the call below (see that
+		// method's own javadoc). Block THIS thread -- a webservice request
+		// thread, not Kurento's own event-dispatch thread, so this wait can
+		// never stall Kurento's event delivery for any other stream -- on a
+		// CompletableFuture until that real completion lands, so THIS
+		// method's own caller (the webservice, deciding whether it is safe
+		// to run conversion) gets back an answer that reflects whether the
+		// file is genuinely finalized, not merely whether the stop command
+		// was issued.
+		long startNanos = System.nanoTime();
+		CompletableFuture<Boolean> completion = new CompletableFuture<>();
+		stream.stopSingleRecord(completion::complete);
+		try {
+			boolean ok = completion.get(STOP_CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+			log.info("Stopped single-stream recording, room {}, requestId {}, confirmed {}, took {}ms", roomId, requestId, ok, (System.nanoTime() - startNanos) / 1_000_000);
+			return ok;
+		} catch (TimeoutException e) {
+			log.warn("stopSingle: media server did not confirm the stop within {}s, room {}, requestId {} -- treating as unsafe to convert", STOP_CONFIRM_TIMEOUT_SECONDS, roomId, requestId);
+			return false;
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			log.warn("stopSingle: interrupted waiting for the media server to confirm the stop, room {}, requestId {}", roomId, requestId, e);
+			return false;
+		} catch (ExecutionException e) {
+			// completion is only ever completed with a plain boolean, via
+			// Consumer<Boolean>::accept (KStream.stopSingleRecord()'s
+			// `then`), which cannot itself raise into the future as a
+			// failure -- kept only because CompletableFuture.get() declares
+			// this checked exception.
+			log.warn("stopSingle: unexpected error waiting for the media server to confirm the stop, room {}, requestId {}", roomId, requestId, e);
+			return false;
+		}
 	}
 }

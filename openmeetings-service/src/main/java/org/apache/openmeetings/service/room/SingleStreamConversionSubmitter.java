@@ -72,6 +72,14 @@ public class SingleStreamConversionSubmitter {
 	// that forgets to set this does not lose conversions over it.
 	private static final String JOBDEF_ENV_VAR = "SINGLE_STREAM_BATCH_JOBDEF";
 
+	// Deliberately short -- isFileSizeStable() below runs on the same
+	// thread that SingleStreamRecordingManager.stopSingle() already blocks
+	// for up to its own, much larger timeout waiting on the media server's
+	// real stop confirmation, so this only needs to catch a chunk that is
+	// GENUINELY still being appended to, not add meaningful latency of its
+	// own on top of an already-finalized one.
+	private static final long FILE_STABILITY_POLL_MS = 250;
+
 	@Inject
 	private ConfigurationDao cfgDao;
 
@@ -97,6 +105,10 @@ public class SingleStreamConversionSubmitter {
 		File webm = getRecordingChunk(roomId, "single_" + requestId);
 		if (!webm.exists()) {
 			log.error("Single-stream chunk missing, room {}, requestId {}, expected at {}", roomId, requestId, webm);
+			return null;
+		}
+		if (!isFileSizeStable(webm)) {
+			log.error("Single-stream chunk {} appears to still be written to (size changed within {}ms), room {}, requestId {} -- refusing to convert a possibly-truncated file", webm, FILE_STABILITY_POLL_MS, roomId, requestId);
 			return null;
 		}
 		File outDir = new File(getStreamsSubDir(roomId), "single");
@@ -140,13 +152,48 @@ public class SingleStreamConversionSubmitter {
 			return null;
 		}
 		// Atomic rename -- "file exists at the final name" is the caller's
-		// unambiguous, race-free completion signal, matching the raw chunk's
-		// own already-finalized-by-stopAndWait guarantee.
+		// unambiguous, race-free completion signal for the OUTPUT mp4. The
+		// INPUT webm's own finalization is no longer just assumed at this
+		// point in the method -- it's checked above (isFileSizeStable()) and,
+		// before that, genuinely enforced by the caller chain:
+		// SingleStreamRecordingManager.stopSingle() blocks on the media
+		// server's real stop confirmation before this method is ever
+		// invoked at all (see its own javadoc for why that used to be a
+		// false assumption rather than an enforced guarantee).
 		if (!partMp4.renameTo(finalMp4)) {
 			log.error("Could not rename {} to {}", partMp4, finalMp4);
 			return null;
 		}
 		log.info("Single-stream conversion done, room {}, requestId {} -> {}", roomId, requestId, finalMp4);
 		return finalMp4;
+	}
+
+	/**
+	 * Second, independent line of defense against the exact race
+	 * {@link org.apache.openmeetings.db.manager.ISingleStreamRecordingManager#stopSingle}'s
+	 * own blocking wait on the media server's real stop confirmation now
+	 * exists to close (see that method's javadoc). By the time
+	 * {@link #convert} is called, the caller chain should already
+	 * guarantee {@code file} is done -- but this stays cheap insurance
+	 * against a future call site reaching {@link #convert} by some other
+	 * route, or a filesystem (e.g. a shared NFS/EFS mount, as production
+	 * actually uses -- see this class's own header comment) whose write
+	 * visibility briefly lags the writer's own close(). A file still
+	 * growing fails this before ffmpeg ever runs, rather than silently
+	 * producing a truncated conversion.
+	 *
+	 * @return true if {@code file}'s size was unchanged (and non-zero)
+	 *         across a short poll interval
+	 */
+	private boolean isFileSizeStable(File file) {
+		long size1 = file.length();
+		try {
+			Thread.sleep(FILE_STABILITY_POLL_MS);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return false;
+		}
+		long size2 = file.length();
+		return size1 == size2 && size1 > 0;
 	}
 }

@@ -53,8 +53,22 @@ public interface ISingleStreamRecordingManager {
 	 * end of a session should never see a failure just for being slightly
 	 * late.
 	 *
+	 * <p>Blocks the calling thread until the media server has genuinely
+	 * confirmed the stop (or a bounded timeout elapses) before returning --
+	 * this is a real wait, not a formality: the implementation's own
+	 * completion signal is asynchronous by nature (see
+	 * {@code KStream.stopSingleRecord}'s javadoc), so a caller that needs to
+	 * know whether the recorded file is safe to hand off for conversion
+	 * cannot get that answer any earlier than this.
+	 *
 	 * @param roomId room the recording was started in
 	 * @param requestId the id returned by {@link #startSingle(Long, String)}
+	 * @return {@code true} if the recording is confirmed stopped and the
+	 *         resulting chunk is safe to convert -- also {@code true} for
+	 *         the idempotent "nothing to stop" case above; {@code false} if
+	 *         the media server reported a failure stopping it, or did not
+	 *         confirm within the implementation's own timeout, in which
+	 *         case the caller should NOT attempt to convert the chunk
 	 */
-	void stopSingle(Long roomId, String requestId);
+	boolean stopSingle(Long roomId, String requestId);
 }

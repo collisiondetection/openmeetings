@@ -489,9 +489,49 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 	 * {@code outgoingMedia} field (via its own, independent
 	 * {@code stopRecorder} completion) while this async completion is still
 	 * pending, and reading the field at that later point used to NPE.
+	 *
+	 * <p>{@code then} is the caller's own hook onto that same real
+	 * completion. It exists because a second, independent bug relied on
+	 * exactly the wrong "stopAndWait blocks" assumption the paragraph above
+	 * already corrects: {@code StreamRecordingWebService.stopSingle} used
+	 * to call this method and then immediately hand the (possibly
+	 * still-being-written) chunk off for conversion, on the strength of
+	 * that same false premise -- proven live to work by only a ~19ms
+	 * margin, i.e. not reliably at all. {@code then} fires exactly once,
+	 * with {@code true} if the recording is genuinely finalized and safe to
+	 * convert, {@code false} if Kurento reported a failure stopping it --
+	 * from whichever thread actually determines that: the Kurento
+	 * continuation thread below on either branch, or (the
+	 * {@code singleRecorder == null} case immediately below) this calling
+	 * thread, synchronously, when there is nothing to wait on. Callers that
+	 * don't need to know (e.g. {@link #release(boolean)}'s own
+	 * abrupt-disconnect teardown below) pass a no-op, matching
+	 * {@link #stopRecorder(boolean, Runnable)}'s existing
+	 * {@code Runnable then} convention for the same "run this after the
+	 * async stop genuinely completes" need -- this one carries a result
+	 * because, unlike that one, a caller here needs to know WHICH way it
+	 * completed, not just that it did.
+	 *
+	 * <p>NOT specially handled: an explicit stop call landing in the exact
+	 * window where a concurrent disconnect has already nulled
+	 * {@code singleRecorder} but its OWN {@code stopAndWait} has not yet
+	 * completed. That is pre-existing behavior, unchanged here -- this
+	 * class's caller ({@code SingleStreamRecordingManager.stopSingle()})
+	 * already treated "nothing found to stop" as "already done, safe to
+	 * convert" before {@code then} existed (its two upstream early-return
+	 * gates, checked before ever reaching this method, never waited on
+	 * anything either), so {@code then.accept(true)} below preserves that
+	 * rather than newly failing the common, genuinely benign case -- a
+	 * caller stopping a bit late, after a natural disconnect that finished
+	 * long ago. Closing the narrow concurrent-disconnect race properly
+	 * would need tracking a shared in-flight completion across callers,
+	 * which is more machinery than this fix's actual scope -- making an
+	 * explicit stop's OWN conversion wait for its OWN confirmation -- calls
+	 * for.
 	 */
-	public synchronized void stopSingleRecord() {
+	public synchronized void stopSingleRecord(Consumer<Boolean> then) {
 		if (singleRecorder == null) {
+			then.accept(true);
 			return;
 		}
 		final RecorderEndpoint toStop = singleRecorder;
@@ -510,12 +550,14 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 			public void onSuccess(Void result) throws Exception {
 				log.trace("PARTICIPANT {}: Single-stream recording stopped, requestId {}", KStream.this.uid, requestId);
 				releaseSingleRecorder(media, toStop);
+				then.accept(true);
 			}
 
 			@Override
 			public void onError(Throwable cause) throws Exception {
 				log.warn("PARTICIPANT {}: Could not stop single-stream recording, requestId {}", KStream.this.uid, requestId, cause);
 				releaseSingleRecorder(media, toStop);
+				then.accept(false);
 			}
 		});
 	}
@@ -626,8 +668,11 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 			// Must run before outgoingMedia is released below, and before a
 			// disconnecting participant's stream disappears out from under an
 			// in-progress single-stream recording -- otherwise the recorder
-			// leaks and the output file is left unfinalized.
-			stopSingleRecord();
+			// leaks and the output file is left unfinalized. Nobody here is
+			// waiting on the outcome (this is teardown, not a caller that
+			// needs to trigger a conversion), so a no-op callback -- matching
+			// stopRecord()'s own use of stopRecorder(true, () -> {}) above.
+			stopSingleRecord(ok -> { });
 			releaseListeners();
 			stopRecorder(false, () -> {
 				releaseRtp();

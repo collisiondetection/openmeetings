@@ -161,15 +161,31 @@ public class StreamRecordingWebService extends BaseWebService {
 	{
 		log.debug("[stopSingle] room id {}, requestId {}", roomId, requestId);
 		return performCall(sid, User.Right.SOAP, sd -> {
-			recManager.stopSingle(roomId, requestId);
-			// Synchronous, matching WbWebService.stopRecording()'s own style --
-			// by now stopSingle()'s stopAndWait has already confirmed the raw
-			// chunk is finalized on disk, so there's nothing to poll for.
+			// recManager.stopSingle() blocks THIS thread until the media
+			// server genuinely confirms the stop (or a bounded timeout
+			// elapses) before returning -- see its own javadoc for exactly
+			// why that wait is real and necessary. An earlier version of
+			// this comment claimed the chunk was "already finalized on
+			// disk" by this point simply because stopSingle() had already
+			// been called -- that was wrong (stopAndWait's own completion
+			// is asynchronous, not synchronous with the call that issues
+			// it; verified live, see KStream.stopSingleRecord()'s javadoc)
+			// and, in real testing, only happened to work by a ~19ms
+			// margin -- i.e. not reliably. It is genuinely true now: a
+			// `false` return means the stop could not be confirmed (a real
+			// media-server failure, or no confirmation within the
+			// timeout), so conversion is skipped rather than risking a
+			// truncated read of a chunk that may still be open for
+			// writing -- matching startSingle() above in returning a
+			// descriptive ERROR result rather than guessing.
 			// A failed conversion is logged by the submitter itself and
 			// reported here as an error result; the raw chunk is left in
 			// place either way; a future commit doesn't need this call site
 			// to change when it becomes an async Batch submission instead --
 			// only what happens inside converter.convert() does.
+			if (!recManager.stopSingle(roomId, requestId)) {
+				return new ServiceResult("Recording stop could not be confirmed by the media server -- see server logs; conversion was not attempted", Type.ERROR);
+			}
 			File mp4 = converter.convert(roomId, requestId);
 			if (mp4 == null) {
 				return new ServiceResult("Recording stopped but conversion failed -- see server logs", Type.ERROR);
