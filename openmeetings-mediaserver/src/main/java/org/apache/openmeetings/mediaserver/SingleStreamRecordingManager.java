@@ -82,6 +82,23 @@ public class SingleStreamRecordingManager implements ISingleStreamRecordingManag
 	// new one.
 	private final Map<String, String> streamUidByRequestId = new ConcurrentHashMap<>();
 
+	// requestId -> the CompletableFuture tracking that requestId's own
+	// in-progress stop -- present ONLY while a "claimant" (see stopSingle())
+	// is actively finalizing it, removed the moment that claimant returns,
+	// success or failure alike. Exists so a second, concurrent stopSingle()
+	// call for the SAME requestId can wait on the SAME real Kurento outcome
+	// instead of separately losing the streamUidByRequestId.remove() race
+	// above (which only one caller can ever win) and reporting success for
+	// having merely lost that race -- before the winner's own stop is even
+	// confirmed. Without this, a "losing" concurrent caller could tell ITS
+	// OWN caller (the webservice, which proceeds straight to conversion on a
+	// `true` result) that it was safe to convert while the winner's real
+	// Kurento confirmation might still be pending -- the same still-open-file
+	// hazard this class's whole convert-after-confirmed-stop design already
+	// exists to prevent for the single-caller case, just reachable again via
+	// a second caller instead. In-JVM only, same caveat as the map above.
+	private final Map<String, CompletableFuture<Boolean>> inFlightStops = new ConcurrentHashMap<>();
+
 	@Override
 	public SingleStreamRecordingStart startSingle(Long roomId, String externalUserId) {
 		if (!kHandler.isConnected()) {
@@ -133,56 +150,98 @@ public class SingleStreamRecordingManager implements ISingleStreamRecordingManag
 
 	@Override
 	public boolean stopSingle(Long roomId, String requestId) {
-		String streamUid = streamUidByRequestId.remove(requestId);
-		if (streamUid == null) {
-			log.info("stopSingle: no in-progress recording for requestId {} in room {} -- already stopped or never started", requestId, roomId);
-			return true;
-		}
-		KStream stream = processor.getByUid(streamUid);
-		if (stream == null) {
-			// The participant already disconnected, which independently calls
-			// KStream.release() -> stopSingleRecord() -- the file is already
-			// finalized, there is simply nothing left here to stop.
-			log.info("stopSingle: stream {} (requestId {}) is already gone in room {}", streamUid, requestId, roomId);
-			return true;
-		}
-		// stream.stopSingleRecord()'s own completion callback fires
-		// asynchronously -- on a separate Kurento JSON-RPC client thread,
-		// once the media server has genuinely finished finalizing the
-		// recording, NOT synchronously within the call below (see that
-		// method's own javadoc). Block THIS thread -- a webservice request
-		// thread, not Kurento's own event-dispatch thread, so this wait can
-		// never stall Kurento's event delivery for any other stream -- on a
-		// CompletableFuture until that real completion lands, so THIS
-		// method's own caller (the webservice, deciding whether it is safe
-		// to run conversion) gets back an answer that reflects whether the
-		// file is genuinely finalized, not merely whether the stop command
-		// was issued.
+		// Claimed at most once per requestId, no matter how many callers
+		// arrive concurrently for it: putIfAbsent() atomically inserts
+		// myCompletion only if nothing is there yet, and its return value
+		// tells every caller whether IT was the one that actually inserted
+		// it. A concurrent second (or third, ...) caller for the SAME
+		// requestId therefore finds the first caller's own future here and
+		// waits on that SAME real outcome below (see awaitStopConfirmation()),
+		// rather than separately losing the streamUidByRequestId race further
+		// down -- which only the winner can ever win anyway -- and reporting
+		// success merely for having lost it. See inFlightStops's own javadoc
+		// for why that mattered.
+		CompletableFuture<Boolean> myCompletion = new CompletableFuture<>();
+		CompletableFuture<Boolean> existing = inFlightStops.putIfAbsent(requestId, myCompletion);
+		boolean isClaimant = existing == null;
+		CompletableFuture<Boolean> completion = isClaimant ? myCompletion : existing;
 		long startNanos = System.nanoTime();
-		CompletableFuture<Boolean> completion = new CompletableFuture<>();
+		if (!isClaimant) {
+			log.info("stopSingle: a concurrent stop for requestId {} in room {} is already being finalized -- waiting on its real outcome instead of assuming success", requestId, roomId);
+			return awaitStopConfirmation(completion, roomId, requestId, startNanos);
+		}
 		try {
-			// Dispatched INSIDE this try, not before it: stopSingleRecord()
-			// declares no checked exceptions, so the only thing that can
-			// escape it is an unchecked RuntimeException from the Kurento
-			// client call it makes (RecorderEndpoint.stopAndWait()) --
-			// possible synchronously, e.g. if the Kurento client connection
-			// drops in the exact instant between KStream's own
-			// singleRecorder-null check and dispatching the stop. Catching
-			// that here, in the same try as the completion wait below,
-			// means a synchronous failure takes the identical fail-safe
-			// path as every asynchronous one already handled below, instead
-			// of propagating past this method entirely and surfacing to the
-			// webservice caller as a raw thrown exception (performCall's
-			// own catch-all turns anything unhandled into a ServiceException,
-			// i.e. an HTTP 500) rather than the descriptive `false` ->
-			// Type.ERROR result every other failure mode here produces. Not
-			// a double-completion risk: if stopAndWait() throws before ever
-			// registering its Continuation with Kurento, that Continuation
-			// can never fire, so `completion` is simply never completed --
-			// exactly like the TimeoutException case below, just via a
-			// different, synchronous route to the same "give up and report
-			// unsafe" outcome.
-			stream.stopSingleRecord(completion::complete);
+			String streamUid = streamUidByRequestId.remove(requestId);
+			if (streamUid == null) {
+				log.info("stopSingle: no in-progress recording for requestId {} in room {} -- already stopped or never started", requestId, roomId);
+				completion.complete(true);
+				return true;
+			}
+			KStream stream = processor.getByUid(streamUid);
+			if (stream == null) {
+				// The participant already disconnected, which independently calls
+				// KStream.release() -> stopSingleRecord() -- the file is already
+				// finalized, there is simply nothing left here to stop.
+				log.info("stopSingle: stream {} (requestId {}) is already gone in room {}", streamUid, requestId, roomId);
+				completion.complete(true);
+				return true;
+			}
+			// stream.stopSingleRecord()'s own completion callback fires
+			// asynchronously -- on a separate Kurento JSON-RPC client thread,
+			// once the media server has genuinely finished finalizing the
+			// recording, NOT synchronously within the call below (see that
+			// method's own javadoc). Block THIS thread -- a webservice request
+			// thread, not Kurento's own event-dispatch thread, so this wait can
+			// never stall Kurento's event delivery for any other stream -- on a
+			// CompletableFuture until that real completion lands, so THIS
+			// method's own caller (the webservice, deciding whether it is safe
+			// to run conversion) gets back an answer that reflects whether the
+			// file is genuinely finalized, not merely whether the stop command
+			// was issued.
+			try {
+				stream.stopSingleRecord(completion::complete);
+			} catch (RuntimeException e) {
+				// stopSingleRecord() declares no checked exceptions, so the
+				// only thing that can escape this call is an unchecked
+				// RuntimeException from the Kurento client call it makes
+				// internally (RecorderEndpoint.stopAndWait()) -- possible
+				// synchronously, e.g. if the Kurento client connection drops
+				// in the exact instant between KStream's own
+				// singleRecorder-null check and dispatching the stop. Caught
+				// here rather than left to propagate past this method
+				// (which performCall's own catch-all would otherwise turn
+				// into a raw thrown ServiceException, i.e. an HTTP 500,
+				// instead of the descriptive `false` -> Type.ERROR result
+				// every other failure mode here produces) -- and completed
+				// as `false` so a concurrently-waiting caller above doesn't
+				// have to sit out the full STOP_CONFIRM_TIMEOUT_SECONDS just
+				// to find out. Not a double-completion risk: if
+				// stopAndWait() throws before ever registering its
+				// Continuation with Kurento, that Continuation can never
+				// fire, so completing it here is the only way it ever will
+				// be.
+				log.warn("stopSingle: stream.stopSingleRecord() threw synchronously, room {}, requestId {} -- treating as unsafe to convert", roomId, requestId, e);
+				completion.complete(false);
+				return false;
+			}
+			return awaitStopConfirmation(completion, roomId, requestId, startNanos);
+		} finally {
+			inFlightStops.remove(requestId, completion);
+		}
+	}
+
+	/**
+	 * Waits for {@code completion} to be resolved by whichever caller is
+	 * actually responsible for finishing this requestId's stop (the
+	 * {@code isClaimant} split in {@link #stopSingle}), and translates every
+	 * way that wait can fail into the same conservative {@code false} ("not
+	 * safely confirmed, do not convert") this class already reports for
+	 * every other failure mode. Shared by both the claimant (which dispatches
+	 * the real stop just before calling this) and any concurrent caller that
+	 * only ever waits.
+	 */
+	private boolean awaitStopConfirmation(CompletableFuture<Boolean> completion, Long roomId, String requestId, long startNanos) {
+		try {
 			boolean ok = completion.get(STOP_CONFIRM_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 			log.info("Stopped single-stream recording, room {}, requestId {}, confirmed {}, took {}ms", roomId, requestId, ok, (System.nanoTime() - startNanos) / 1_000_000);
 			return ok;
@@ -194,15 +253,13 @@ public class SingleStreamRecordingManager implements ISingleStreamRecordingManag
 			log.warn("stopSingle: interrupted waiting for the media server to confirm the stop, room {}, requestId {}", roomId, requestId, e);
 			return false;
 		} catch (ExecutionException e) {
-			// completion is only ever completed with a plain boolean, via
+			// completion is only ever completed with a plain boolean -- via
 			// Consumer<Boolean>::accept (KStream.stopSingleRecord()'s
-			// `then`), which cannot itself raise into the future as a
-			// failure -- kept only because CompletableFuture.get() declares
-			// this checked exception.
+			// `then`) or this class's own synchronous-throw fallback above --
+			// neither of which can raise into the future as a failure; kept
+			// only because CompletableFuture.get() declares this checked
+			// exception.
 			log.warn("stopSingle: unexpected error waiting for the media server to confirm the stop, room {}, requestId {}", roomId, requestId, e);
-			return false;
-		} catch (RuntimeException e) {
-			log.warn("stopSingle: stream.stopSingleRecord() threw synchronously, room {}, requestId {} -- treating as unsafe to convert", roomId, requestId, e);
 			return false;
 		}
 	}
