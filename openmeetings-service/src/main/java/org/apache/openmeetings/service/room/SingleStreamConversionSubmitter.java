@@ -29,6 +29,7 @@ import static org.apache.openmeetings.util.OpenmeetingsVariables.getVideoPreset;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.openmeetings.db.dao.basic.ConfigurationDao;
 import org.apache.openmeetings.util.process.ProcessHelper;
@@ -46,16 +47,30 @@ import jakarta.inject.Inject;
  * recording-registration pipeline ({@link org.apache.openmeetings.db.dao.record.RecordingChunkDao}/
  * {@code Recording}), since a single-participant recording has neither.
  *
- * Runs a plain local ffmpeg process today (the "smallest safe increment to
- * verify live" step) -- reusing the EXACT same output recipe
- * {@code BaseConverter.addMp4OutParams()} already uses for every other
- * recording this project produces, since that's already proven
- * Rekognition-compatible. A later commit points this at AWS Batch instead,
- * without changing the argv this class builds.
+ * Reuses whatever {@code path.ffmpeg} already resolves to -- in production
+ * that is {@code terraform/templates/ffmpeg-batch-submit.sh}, deployed under
+ * the name "ffmpeg" so OM's own {@code BaseConverter} (and now this class)
+ * invoke it transparently, with no code-level AWS Batch integration needed
+ * here at all: the shim already submits, polls, and falls back to local
+ * conversion on any non-ffmpeg failure. The only thing this class adds on
+ * top is telling that shim which job DEFINITION to use -- see
+ * {@code SINGLE_STREAM_BATCH_JOBDEF} below -- since its own default targets
+ * the main (larger, multi-track) conversion job. In a dev/test environment
+ * with no shim installed, {@code path.ffmpeg} resolves to the real ffmpeg
+ * binary and this env var is simply ignored.
  */
 @Component
 public class SingleStreamConversionSubmitter {
 	private static final Logger log = LoggerFactory.getLogger(SingleStreamConversionSubmitter.class);
+
+	// Deployment-time, not an OM admin setting -- matches how every other
+	// per-environment value this shim/container already needs (OM_DB_HOST,
+	// OM_KURENTO_WS_URL, ...) is supplied: a container env var, not a new
+	// row in OM's own configuration table. Left unset, the shim falls back
+	// to ITS OWN default (the main conversion job) -- degraded (wrong-sized
+	// compute, shared cost/log accounting) but not broken, so a deployment
+	// that forgets to set this does not lose conversions over it.
+	private static final String JOBDEF_ENV_VAR = "SINGLE_STREAM_BATCH_JOBDEF";
 
 	@Inject
 	private ConfigurationDao cfgDao;
@@ -116,7 +131,9 @@ public class SingleStreamConversionSubmitter {
 				));
 		argv.add(partMp4.getAbsolutePath());
 
-		ProcessResult result = ProcessHelper.exec("single-stream-convert", argv);
+		String jobDef = System.getenv(JOBDEF_ENV_VAR);
+		Map<String, String> env = (jobDef == null || jobDef.isEmpty()) ? Map.of() : Map.of("BATCH_JOBDEF", jobDef);
+		ProcessResult result = ProcessHelper.exec("single-stream-convert", argv, env);
 		if (!result.isOk()) {
 			log.error("Single-stream conversion failed, room {}, requestId {}: {}", roomId, requestId, result.buildLogMessage());
 			partMp4.delete();

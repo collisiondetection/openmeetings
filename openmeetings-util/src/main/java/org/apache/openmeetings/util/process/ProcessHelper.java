@@ -97,6 +97,16 @@ public class ProcessHelper {
 		return exec(process, argv, Map.of(), optional);
 	}
 
+	/**
+	 * Same as {@link #exec(String, List)}, but with additional environment
+	 * variables set on the child process (added to, not replacing, the JVM's
+	 * own environment -- see the {@code pb.environment().putAll(env)} call
+	 * below).
+	 */
+	public static ProcessResult exec(String process, List<String> argv, Map<String, String> env) {
+		return exec(process, argv, env, false);
+	}
+
 	private static ProcessResult exec(String process, List<String> argv, Map<String, String> env, boolean optional) {
 		ProcessResult res = new ProcessResult()
 				.setProcess(process)
