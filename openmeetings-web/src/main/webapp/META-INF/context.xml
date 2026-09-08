@@ -19,5 +19,23 @@
 
 -->
 <Context>
-	<CookieProcessor sameSiteCookies="Lax" />
+	<!-- SSR-1 (AUDIT_FINDINGS.md): upstream ships Lax here, which silently
+	     breaks session continuity the moment this app is loaded inside a
+	     cross-origin iframe -- exactly how mod_tutorship embeds an OM room
+	     inside Moodle (different host/port = third-party context to the
+	     browser). A Lax cookie set on the iframe's own first request is
+	     never sent back on that same iframe's later requests (only "safe"
+	     top-level navigations qualify for Lax), so every subsequent request
+	     lands in a brand-new session with no soap/hash state -- observed
+	     directly as WebSession.checkHashes() firing twice for one hash, the
+	     second call finding it "already used" and rejecting a session that
+	     had, moments earlier, genuinely authorized.
+	     None is the correct value for this deployment shape; Tomcat's own
+	     Rfc6265CookieProcessor already adds Secure automatically whenever
+	     the triggering request was itself HTTPS (verified: HTTP -> no
+	     Secure, HTTPS -> Secure present), so this is a no-op change for
+	     plain-HTTP local dev (Chrome discards a None cookie lacking Secure
+	     and falls back to its own default, i.e. unchanged local behaviour)
+	     and a real fix for HTTPS-fronted staging/production. -->
+	<CookieProcessor sameSiteCookies="None" />
 </Context>
