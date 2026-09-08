@@ -21,6 +21,8 @@ package org.apache.openmeetings.service.room;
 import static org.apache.openmeetings.util.OmFileHelper.getName;
 import static org.apache.openmeetings.util.OmFileHelper.getRecordingChunk;
 import static org.apache.openmeetings.util.OmFileHelper.getStreamsSubDir;
+import static org.apache.openmeetings.util.OmFileHelper.markWorldReadable;
+import static org.apache.openmeetings.util.OmFileHelper.markWorldTraversable;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.CONFIG_PATH_FFMPEG;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.getAudioBitrate;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.getAudioRate;
@@ -111,11 +113,21 @@ public class SingleStreamConversionSubmitter {
 			log.error("Single-stream chunk {} appears to still be written to (size changed within {}ms), room {}, requestId {} -- refusing to convert a possibly-truncated file", webm, FILE_STABILITY_POLL_MS, roomId, requestId);
 			return null;
 		}
-		File outDir = new File(getStreamsSubDir(roomId), "single");
+		File streamsDir = getStreamsSubDir(roomId);
+		File outDir = new File(streamsDir, "single");
 		if (!outDir.exists() && !outDir.mkdirs()) {
 			log.error("Could not create single-stream output dir {}", outDir);
 			return null;
 		}
+		// This mp4 is read by a DIFFERENT process (Moodle, in a different
+		// container over a shared volume) -- the default create mode leaves
+		// it invisible to that process's own user regardless of the file's
+		// own permissions once written (WbRecordingManager hit this same bug
+		// class first; see OmFileHelper.markWorldTraversable()'s own javadoc).
+		// Marked on every call, not just first creation, so a directory that
+		// already existed before this fix shipped still gets corrected.
+		markWorldTraversable(outDir);
+		markWorldTraversable(streamsDir);
 		File finalMp4 = new File(outDir, getName(requestId, "mp4"));
 		File partMp4 = new File(outDir, getName(requestId, "mp4.part"));
 
@@ -164,6 +176,7 @@ public class SingleStreamConversionSubmitter {
 			log.error("Could not rename {} to {}", partMp4, finalMp4);
 			return null;
 		}
+		markWorldReadable(finalMp4);
 		log.info("Single-stream conversion done, room {}, requestId {} -> {}", roomId, requestId, finalMp4);
 		return finalMp4;
 	}

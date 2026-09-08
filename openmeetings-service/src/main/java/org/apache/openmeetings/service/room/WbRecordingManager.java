@@ -94,9 +94,9 @@ public final class WbRecordingManager {
 		// world-readable file is still unreachable behind a non-world-executable
 		// parent directory, so both need fixing, and getStreamsSubDir()'s parent
 		// (streams/) is created the same restrictive way on first use too.
-		markWorldReadable(file);
-		markWorldTraversable(dir);
-		markWorldTraversable(dir.getParentFile());
+		OmFileHelper.markWorldReadable(file);
+		OmFileHelper.markWorldTraversable(dir);
+		OmFileHelper.markWorldTraversable(dir.getParentFile());
 		writeLine(session, new JSONObject()
 				.put("type", "snapshot")
 				.put("ts", System.currentTimeMillis())
@@ -205,7 +205,7 @@ public final class WbRecordingManager {
 			log.warn("Could not create assets dir {}", assetsDir.getAbsolutePath());
 			return;
 		}
-		markWorldTraversable(assetsDir);
+		OmFileHelper.markWorldTraversable(assetsDir);
 
 		Map<String, Object> manifest = new HashMap<>();
 		for (JSONObject item : byUid.values()) {
@@ -238,7 +238,7 @@ public final class WbRecordingManager {
 						}
 						File dest = new File(assetsDir, uid + "_" + slide + "." + extensionOf(src.getName()));
 						Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
-						markWorldReadable(dest);
+						OmFileHelper.markWorldReadable(dest);
 						slidePaths.put("assets/" + dest.getName());
 					}
 					if (slidePaths.length() > 0) {
@@ -252,7 +252,7 @@ public final class WbRecordingManager {
 					}
 					File dest = new File(assetsDir, uid + "." + extensionOf(src.getName()));
 					Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
-					markWorldReadable(dest);
+					OmFileHelper.markWorldReadable(dest);
 					manifest.put(uid, "assets/" + dest.getName());
 				}
 			} catch (Exception e) {
@@ -378,16 +378,4 @@ public final class WbRecordingManager {
 		}
 	}
 
-	private static void markWorldReadable(File f) {
-		if (!f.setReadable(true, false)) {
-			log.warn("Could not make world-readable: {}", f.getAbsolutePath());
-		}
-	}
-
-	private static void markWorldTraversable(File dir) {
-		markWorldReadable(dir);
-		if (!dir.setExecutable(true, false)) {
-			log.warn("Could not make world-traversable: {}", dir.getAbsolutePath());
-		}
-	}
 }

@@ -411,4 +411,34 @@ public class OmFileHelper {
 		}
 		return res.toFile();
 	}
+
+	/**
+	 * Marks a file world-readable. Shared by every "written here for a
+	 * DIFFERENT process (Moodle, in a different container over a shared
+	 * volume) to read" file this project produces -- the default create mode
+	 * (umask-dependent; commonly 640) leaves such a file invisible to a
+	 * reader that isn't this JVM's own user, which is otherwise silent: no
+	 * exception, {@code file_exists()} on the reading side just returns
+	 * false and the file is treated as not-yet-ready forever.
+	 */
+	public static void markWorldReadable(File f) {
+		if (!f.setReadable(true, false)) {
+			log.warn("Could not make world-readable: {}", f.getAbsolutePath());
+		}
+	}
+
+	/**
+	 * Marks a directory world-readable AND world-executable -- a
+	 * world-readable file behind a non-world-executable parent directory is
+	 * still unreachable cross-container, so a caller exposing a file via
+	 * {@link #markWorldReadable(File)} must also call this on that file's
+	 * containing directory (and that directory's own parent, if it too was
+	 * freshly created).
+	 */
+	public static void markWorldTraversable(File dir) {
+		markWorldReadable(dir);
+		if (!dir.setExecutable(true, false)) {
+			log.warn("Could not make world-traversable: {}", dir.getAbsolutePath());
+		}
+	}
 }
