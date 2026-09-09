@@ -43,6 +43,7 @@ import org.apache.openmeetings.db.entity.basic.ChatMessage;
 import org.apache.openmeetings.db.entity.basic.Client;
 import org.apache.openmeetings.db.entity.room.Room;
 import org.apache.openmeetings.db.entity.user.User;
+import org.apache.openmeetings.service.room.WbRecordingManager;
 import org.apache.openmeetings.web.app.ClientManager;
 import org.apache.openmeetings.web.common.MainPanel;
 import org.apache.wicket.ajax.AbstractDefaultAjaxBehavior;
@@ -85,6 +86,17 @@ public class Chat extends Panel {
 					if (m.isNeedModeration() && isModerator(cm, getUserId(), roomId)) {
 						m.setNeedModeration(false);
 						chatDao.update(m);
+						// The moderation-ACCEPT re-broadcast -- the moment the room
+						// at large first saw a held message, which is the timeline
+						// instant the replay side displays it at (accept=true pairs
+						// this line with the original held send line by message id).
+						// Room id from the entity, matching what sendRoom() itself
+						// broadcasts to, not the request's own roomId param. Known
+						// gap, deliberate: mod_tutorship's AWS moderation pipeline
+						// releases held messages by writing need_moderation=0
+						// straight into OM's DB, which never passes through here --
+						// a message released that way stays "held" in this log.
+						WbRecordingManager.recordChat(m.getToRoom().getId(), m, true);
 						ChatWebSocketHelper.sendRoom(m, getMessage(List.of(m)).put("mode",  "accept"));
 					} else {
 						log.error("It seems like we are being hacked!!!!");

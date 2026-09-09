@@ -28,10 +28,13 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 import org.apache.openmeetings.db.dao.file.FileItemDao;
+import org.apache.openmeetings.db.entity.basic.ChatMessage;
 import org.apache.openmeetings.db.entity.file.BaseFileItem;
+import org.apache.openmeetings.db.entity.user.User;
 import org.apache.openmeetings.util.OmFileHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -149,5 +152,95 @@ class WbRecordingManagerTest {
 			assertTrue(exported.exists(), "exported slide file missing on disk: " + exported);
 			assertTrue(exported.length() > 0, "exported slide file is empty: " + exported);
 		}
+	}
+
+	private static ChatMessage chatMessage(Long id, String text, boolean needModeration) {
+		User from = mock(User.class);
+		when(from.getId()).thenReturn(7L);
+		when(from.getExternalId()).thenReturn("3");
+		when(from.getDisplayName()).thenReturn("Fallback Display");
+		ChatMessage m = new ChatMessage();
+		m.setId(id);
+		m.setMessage(text);
+		m.setSent(new Date(1700000000000L));
+		m.setNeedModeration(needModeration);
+		m.setFromName("Demo Teacher");
+		m.setFromUser(from);
+		return m;
+	}
+
+	private File soleLogFile() {
+		File streamsDir = OmFileHelper.getStreamsSubDir(ROOM_ID);
+		File[] logFiles = streamsDir.listFiles((d, name) -> name.startsWith("wb_") && name.endsWith(".jsonl"));
+		assertNotNull(logFiles);
+		assertEquals(1, logFiles.length, "expected exactly one whiteboard log file");
+		return logFiles[0];
+	}
+
+	@Test
+	void chatInterleavesIntoTheSameLogWithCapabilityMarker() throws Exception {
+		WbRecordingManager.start(ROOM_ID, new JSONObject().put("activeWb", 0).put("boards", new JSONObject()));
+		WbRecordingManager.record(ROOM_ID, "setSlide", new JSONObject().put("wbId", 0).put("slide", 1));
+		WbRecordingManager.recordChat(ROOM_ID, chatMessage(42L, "<p>Hello class</p>", false), false);
+		WbRecordingManager.recordChat(ROOM_ID, chatMessage(43L, "<p>held one</p>", true), false);
+		// The accept re-broadcast carries needModeration=false (Chat.java flips
+		// it before broadcasting) and the SAME id as its held send line.
+		WbRecordingManager.recordChat(ROOM_ID, chatMessage(43L, "<p>held one</p>", false), true);
+		WbRecordingManager.stop(ROOM_ID);
+
+		List<String> lines = Files.readAllLines(soleLogFile().toPath(), StandardCharsets.UTF_8);
+		JSONObject snapshotLine = new JSONObject(lines.get(0));
+		assertTrue(snapshotLine.optBoolean("chat", false),
+				"snapshot line must carry the chat-capture capability marker -- without it the replay side "
+				+ "cannot distinguish 'nobody chatted' from 'this log predates chat capture'");
+
+		List<JSONObject> chatLines = new ArrayList<>();
+		for (String line : lines) {
+			JSONObject decoded = new JSONObject(line);
+			if ("chat".equals(decoded.optString("type", null))) {
+				chatLines.add(decoded);
+			}
+		}
+		assertEquals(3, chatLines.size());
+
+		JSONObject first = chatLines.get(0);
+		assertTrue(first.getLong("ts") > 0);
+		assertTrue(!first.has("accept"), "a plain send line must not carry the accept marker");
+		JSONObject msg = first.getJSONObject("msg");
+		assertEquals(42L, msg.getLong("id"));
+		assertEquals("<p>Hello class</p>", msg.getString("text"));
+		assertEquals("Demo Teacher", msg.getString("fromName"));
+		assertEquals(7L, msg.getLong("fromUserId"));
+		assertEquals("3", msg.getString("fromExternalId"));
+		assertEquals(1700000000000L, msg.getLong("sent"));
+		assertEquals(false, msg.getBoolean("needModeration"));
+
+		assertEquals(true, chatLines.get(1).getJSONObject("msg").getBoolean("needModeration"));
+		JSONObject accept = chatLines.get(2);
+		assertTrue(accept.getBoolean("accept"), "the moderation-accept line must be marked accept=true");
+		assertEquals(43L, accept.getJSONObject("msg").getLong("id"));
+	}
+
+	@Test
+	void chatFallsBackToDisplayNameWhenFromNameIsBlank() throws Exception {
+		WbRecordingManager.start(ROOM_ID, new JSONObject().put("activeWb", 0).put("boards", new JSONObject()));
+		ChatMessage m = chatMessage(50L, "hi", false);
+		m.setFromName(null);
+		WbRecordingManager.recordChat(ROOM_ID, m, false);
+		WbRecordingManager.stop(ROOM_ID);
+
+		List<String> lines = Files.readAllLines(soleLogFile().toPath(), StandardCharsets.UTF_8);
+		JSONObject chatLine = new JSONObject(lines.get(lines.size() - 1));
+		assertEquals("Fallback Display", chatLine.getJSONObject("msg").getString("fromName"));
+	}
+
+	@Test
+	void chatIsASilentNoOpWhenNotRecording() {
+		// Must not throw and must not create a log -- same contract record()
+		// itself has for a room with no active session.
+		WbRecordingManager.recordChat(ROOM_ID, chatMessage(60L, "dropped", false), false);
+		File streamsDir = OmFileHelper.getStreamsSubDir(ROOM_ID);
+		File[] logFiles = streamsDir.listFiles((d, name) -> name.startsWith("wb_") && name.endsWith(".jsonl"));
+		assertTrue(logFiles == null || logFiles.length == 0);
 	}
 }

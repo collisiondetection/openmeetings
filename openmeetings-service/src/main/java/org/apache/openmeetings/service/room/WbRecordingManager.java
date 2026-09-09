@@ -31,7 +31,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.openmeetings.db.dao.file.FileItemDao;
+import org.apache.openmeetings.db.entity.basic.ChatMessage;
 import org.apache.openmeetings.db.entity.file.BaseFileItem;
+import org.apache.openmeetings.db.entity.user.User;
 import org.apache.openmeetings.util.NullStringer;
 import org.apache.openmeetings.util.OmFileHelper;
 import org.slf4j.Logger;
@@ -97,9 +99,17 @@ public final class WbRecordingManager {
 		OmFileHelper.markWorldReadable(file);
 		OmFileHelper.markWorldTraversable(dir);
 		OmFileHelper.markWorldTraversable(dir.getParentFile());
+		// "chat": true is a CAPABILITY marker, not data: it lets the replay
+		// side distinguish "this build captured room chat and nobody said
+		// anything" (honest empty state) from "this log predates chat capture
+		// entirely" (capture never ran) -- without it the two are
+		// indistinguishable, and the replay page's output is treated as real
+		// session evidence, so it must never present the second case as the
+		// first.
 		writeLine(session, new JSONObject()
 				.put("type", "snapshot")
 				.put("ts", System.currentTimeMillis())
+				.put("chat", true)
 				.put("snapshot", snapshot));
 		ACTIVE.put(roomId, session);
 		log.info("Whiteboard recording started for room {}: {}", roomId, file.getAbsolutePath());
@@ -367,6 +377,87 @@ public final class WbRecordingManager {
 					.put("param", param));
 		} catch (IOException e) {
 			log.error("Failed to persist whiteboard event for room {}, func {}", roomId, func, e);
+		}
+	}
+
+	/**
+	 * Appends one ROOM chat message to the same JSONL log the whiteboard
+	 * events go into -- one file, one lifecycle, one clock
+	 * ({@code System.currentTimeMillis()} at broadcast time, identical to
+	 * {@link #record}'s own "ts" semantics), interleaved rather than a
+	 * second log precisely because chat capture is exactly coextensive with
+	 * the whiteboard recording window and has the same single consumer (the
+	 * Moodle replay page, which already switches on each line's "type").
+	 *
+	 * Called from the two openmeetings-web call sites that originate every
+	 * local room-chat broadcast (ChatForm's send, Chat's moderation-accept)
+	 * rather than from inside ChatWebSocketHelper itself -- NOT an oversight:
+	 * ChatWebSocketHelper lives in openmeetings-core, which sits BELOW this
+	 * module in the dependency graph (core -> db only) and cannot reference
+	 * it. The wb hook only got to live inside its own broadcast funnel
+	 * because WbWebSocketHelper happens to be an openmeetings-web class.
+	 * Cluster-inbound chat (Application's ChatWebSocketHelper.send() path)
+	 * is knowingly not captured -- this manager is single-node only (see the
+	 * class doc), so that path never carries a message a local send didn't.
+	 *
+	 * The line is built from the ChatMessage ENTITY, never from the broadcast
+	 * JSON: that payload is per-recipient (viewer-dependent "actions",
+	 * per-viewer-locale date strings, a live-session avatar URL) -- the same
+	 * dead-on-replay trap the asset export already documents for "_src" URLs.
+	 * fromExternalId is included because this deployment provisions every OM
+	 * account with externalId = the Moodle user id, which is the identity the
+	 * replay side can actually map to a session participant.
+	 *
+	 * @param roomId room the message was broadcast to
+	 * @param m the persisted message entity
+	 * @param accept true when this is the moderation-accept re-broadcast of
+	 *               an earlier needModeration message (same message id turns
+	 *               up twice in the log; the replay side pairs them)
+	 */
+	public static void recordChat(Long roomId, ChatMessage m, boolean accept) {
+		Session session = ACTIVE.get(roomId);
+		if (session == null) {
+			return;
+		}
+		try {
+			User from = m.getFromUser();
+			JSONObject msg = new JSONObject()
+					.put("needModeration", m.isNeedModeration())
+					.put("text", m.getMessage() == null ? "" : m.getMessage());
+			if (m.getId() != null) {
+				msg.put("id", m.getId());
+			}
+			if (m.getSent() != null) {
+				msg.put("sent", m.getSent().getTime());
+			}
+			// getFromName() first: it's what the live chat panel itself shows
+			// as "displayName", set at send time -- and the entity doc calls
+			// it out as the only name for users with no first/last name.
+			String name = m.getFromName();
+			if ((name == null || name.isBlank()) && from != null) {
+				name = from.getDisplayName();
+			}
+			if (name != null && !name.isBlank()) {
+				msg.put("fromName", name);
+			}
+			if (from != null) {
+				if (from.getId() != null) {
+					msg.put("fromUserId", from.getId());
+				}
+				if (from.getExternalId() != null && !from.getExternalId().isBlank()) {
+					msg.put("fromExternalId", from.getExternalId());
+				}
+			}
+			JSONObject line = new JSONObject()
+					.put("type", "chat")
+					.put("ts", System.currentTimeMillis())
+					.put("msg", msg);
+			if (accept) {
+				line.put("accept", true);
+			}
+			writeLine(session, line);
+		} catch (IOException e) {
+			log.error("Failed to persist chat message for room {}", roomId, e);
 		}
 	}
 

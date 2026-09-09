@@ -37,6 +37,7 @@ import org.apache.openmeetings.db.entity.basic.ChatMessage;
 import org.apache.openmeetings.db.entity.basic.Client;
 import org.apache.openmeetings.db.entity.room.Room;
 import org.apache.openmeetings.db.entity.user.User;
+import org.apache.openmeetings.service.room.WbRecordingManager;
 import org.apache.openmeetings.web.app.ClientManager;
 import org.apache.openmeetings.web.common.MainPanel;
 import org.apache.wicket.Component;
@@ -136,6 +137,18 @@ public class ChatForm extends Form<Void> {
 					chatDao.update(m);
 					JSONObject msg = getChat().getMessage(List.of(m));
 					if (m.getToRoom() != null) {
+						// Recorded HERE, at the call site, not inside
+						// ChatWebSocketHelper's own sendRoom() funnel where the wb
+						// hook lives in ITS helper -- that class is openmeetings-core,
+						// which cannot see openmeetings-service (see
+						// WbRecordingManager.recordChat()'s doc for the module-graph
+						// detail). This branch and Chat's moderation-accept are the
+						// only two local room-chat broadcast origins. ROOM scope
+						// only, deliberately: the sendUser/sendAll branches below
+						// must never be recorded -- a private DM or global-chat line
+						// landing in a session's evidence log would be a real
+						// privacy failure, not a missing feature.
+						WbRecordingManager.recordChat(m.getToRoom().getId(), m, false);
 						ChatWebSocketHelper.sendRoom(m, msg);
 					} else if (m.getToUser() != null) {
 						ChatWebSocketHelper.sendUser(getUserId(), m, msg);
