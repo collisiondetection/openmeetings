@@ -23,6 +23,7 @@ package org.apache.openmeetings.mediaserver;
 
 import static java.util.UUID.randomUUID;
 import static java.util.concurrent.CompletableFuture.delayedExecutor;
+import static org.apache.openmeetings.db.util.ApplicationHelper.ensureApplication;
 import static org.apache.openmeetings.mediaserver.KurentoHandler.PARAM_CANDIDATE;
 import static org.apache.openmeetings.mediaserver.KurentoHandler.PARAM_ICE;
 import static org.apache.openmeetings.mediaserver.KurentoHandler.TAG_ROOM;
@@ -107,6 +108,24 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 	private boolean hasVideo;
 	private boolean hasScreen;
 	private boolean sipClient;
+	// A browser-less AI stand-in participant whose media enters the room via a
+	// plain RtpEndpoint fed by an external RTP source (the Python media bridge),
+	// NOT a browser and NOT a SIP/Asterisk leg. Deliberately a DEDICATED flag,
+	// not a reuse of sipClient: KRoom.updateSipCount() calls addSipProcessor()
+	// on every stream when a room's real Asterisk registration count changes,
+	// and count==0 on a sipClient stream tears that whole stream down -- so
+	// riding on sipClient would let unrelated SIP bookkeeping silently kill the
+	// stand-in's session if SIP is ever enabled for the room. This flag keeps
+	// the stand-in out of that path entirely (see RtpParticipantManager).
+	private boolean rtpParticipant;
+	// The AI stand-in's REVERSE audio leg, when THIS stream is a real (human)
+	// participant grafted to feed a stand-in bridge: a dedicated RtpEndpoint
+	// carrying this participant's own outgoing audio out to the bridge's fixed
+	// listening address. Deliberately its own field, never the SIP `rtpEndpoint`
+	// above, so addSipProcessor/updateSipCount can never release it (same reason
+	// the rtpParticipant flag above is dedicated). Null unless a stand-in in
+	// this room has an active reverse leg wired onto this participant.
+	private RtpEndpoint aiReverseRtp;
 	// Single-participant recording: a second, independent RecorderEndpoint on
 	// the same outgoingMedia, deliberately never touching recorder/chunkId/
 	// kRoom.getRecordingId() above -- this must work whether or not the room's
@@ -132,6 +151,151 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 		streamType = sd.getType();
 		this.connectedSince = new Date();
 		Injector.get().inject(this);
+	}
+
+	/**
+	 * A browser-less AI stand-in participant whose media is fed by an external
+	 * RTP source (the Python media bridge) rather than a browser or a
+	 * SIP/Asterisk leg. Mirrors the {@code sipClient} branch of
+	 * {@link #onInviteOk(String, Consumer)} -- process a plain RTP SDP offer,
+	 * set the resulting {@link RtpEndpoint} as {@code outgoingMedia}, then
+	 * announce the stream to the room exactly as a real webcam broadcast would
+	 * via {@link #internalStartBroadcast}/{@link #notifyOnNewStream}.
+	 *
+	 * <p>Two deliberate differences from that SIP precedent: (1) VIDEO is
+	 * carried as well as AUDIO when {@code sd} has it (SIP is audio-only);
+	 * (2) it sets the dedicated {@link #rtpParticipant} flag rather than the
+	 * SIP {@code sipClient} one, so {@link #internalStartBroadcast} takes its
+	 * browser-less branch (no WebRTC loopback listener, no SIP processor) WITHOUT
+	 * exposing the session to {@code updateSipCount}-driven teardown.
+	 *
+	 * @param sd the synthetic participant's own StreamDesc (AUDIO, or AUDIO+VIDEO)
+	 * @param sdpOffer a sendonly RTP SDP offer describing the external source
+	 * @param answerConsumer receives Kurento's SDP answer (its receive IP+ports),
+	 *                       or a string starting with {@code "ERROR:"} on failure
+	 */
+	public synchronized void startRtpParticipant(final StreamDesc sd, final String sdpOffer, final Consumer<String> answerConsumer) {
+		hasAudio = sd.has(Activity.AUDIO);
+		hasVideo = sd.has(Activity.VIDEO);
+		hasScreen = false;
+		rtpParticipant = true;
+		if (hasAudio && hasVideo) {
+			type = Type.AUDIO_VIDEO;
+			profile = MediaProfileSpecType.WEBM;
+		} else if (hasVideo) {
+			type = Type.VIDEO_ONLY;
+			profile = MediaProfileSpecType.WEBM_VIDEO_ONLY;
+		} else {
+			type = Type.AUDIO_ONLY;
+			profile = MediaProfileSpecType.WEBM_AUDIO_ONLY;
+		}
+		pipeline = kHandler.createPipiline(Map.of(TAG_ROOM, String.valueOf(getRoomId()), TAG_STREAM_UID, sd.getUid()), new Continuation<Void>() {
+			@Override
+			public void onSuccess(Void result) throws Exception {
+				try {
+					// This continuation runs on a Kurento client thread; bind the
+					// Wicket Application here too, since notifyOnNewStream ->
+					// WebSocketHelper may call Application.get() (same pattern
+					// KRoom.startRecording already relies on).
+					ensureApplication();
+					RtpEndpoint rtp = new RtpEndpoint.Builder(pipeline).build();
+					setTags(rtp, uid);
+					String answer = rtp.processOffer(sdpOffer);
+					outgoingMedia = rtp;
+					internalStartBroadcast(sd, sdpOffer);
+					notifyOnNewStream(sd);
+					log.info("RTP participant started, uid {}, hasAudio {}, hasVideo {}", uid, hasAudio, hasVideo);
+					answerConsumer.accept(answer);
+				} catch (Exception e) {
+					log.error("RTP participant failed during endpoint setup, uid {}", KStream.this.uid, e);
+					answerConsumer.accept("ERROR: " + e.getMessage());
+				}
+			}
+
+			@Override
+			public void onError(Throwable cause) throws Exception {
+				log.error("RTP participant unable to create pipeline {}", KStream.this.uid, cause);
+				answerConsumer.accept("ERROR: pipeline " + cause.getMessage());
+			}
+		});
+	}
+
+	/**
+	 * Graft an AI stand-in's REVERSE audio leg onto THIS (real, human)
+	 * participant: create a dedicated {@link RtpEndpoint} in this stream's own
+	 * pipeline (a reverse endpoint must live in the SOURCE participant's
+	 * pipeline -- Kurento only connects elements within one pipeline), connect
+	 * this participant's outgoing audio into it, and point it at the stand-in
+	 * bridge described by {@code reverseSdpOffer} (a recvonly offer carrying the
+	 * bridge's own listening IP+port). Returns Kurento's SDP answer, or
+	 * {@code null} if there is nothing to wire onto yet.
+	 *
+	 * <p>Uses the dedicated {@link #aiReverseRtp} field, never the SIP
+	 * {@code rtpEndpoint}, so SIP participant-count bookkeeping can never
+	 * release it out from under the stand-in.
+	 */
+	public synchronized String wireAiReverseLeg(String reverseSdpOffer) {
+		if (outgoingMedia == null) {
+			log.warn("wireAiReverseLeg: participant {} is not broadcasting yet, cannot wire reverse leg", uid);
+			return null;
+		}
+		if (aiReverseRtp != null) {
+			log.info("wireAiReverseLeg: reverse leg already wired on participant {}", uid);
+			return null;
+		}
+		RtpEndpoint rtp = new RtpEndpoint.Builder(pipeline).build();
+		rtp.addTag("aiReverse", this.uid);
+		String answer = rtp.processOffer(reverseSdpOffer);
+		outgoingMedia.connect(rtp, MediaType.AUDIO);
+		aiReverseRtp = rtp;
+		log.info("wireAiReverseLeg: reverse audio leg wired onto participant {}", uid);
+		return answer;
+	}
+
+	/**
+	 * Explicitly release the AI stand-in reverse leg grafted onto this
+	 * participant (used when the stand-in ends while this participant stays in
+	 * the room). Idempotent -- a no-op if no reverse leg is wired.
+	 */
+	public synchronized void releaseAiReverseLeg() {
+		if (aiReverseRtp == null) {
+			return;
+		}
+		final RtpEndpoint toRelease = aiReverseRtp;
+		aiReverseRtp = null;
+		final BaseRtpEndpoint media = outgoingMedia;
+		if (media != null) {
+			media.disconnect(toRelease, new Continuation<Void>() {
+				@Override
+				public void onSuccess(Void result) throws Exception {
+					log.trace("PARTICIPANT {}: AI reverse leg disconnected", KStream.this.uid);
+				}
+
+				@Override
+				public void onError(Throwable cause) throws Exception {
+					log.warn("PARTICIPANT {}: could not disconnect AI reverse leg", KStream.this.uid, cause);
+				}
+			});
+		}
+		toRelease.release(new Continuation<Void>() {
+			@Override
+			public void onSuccess(Void result) throws Exception {
+				log.trace("PARTICIPANT {}: AI reverse leg released", KStream.this.uid);
+			}
+
+			@Override
+			public void onError(Throwable cause) throws Exception {
+				log.warn("PARTICIPANT {}: could not release AI reverse leg", KStream.this.uid, cause);
+			}
+		});
+	}
+
+	public boolean isRtpParticipant() {
+		return rtpParticipant;
+	}
+
+	public boolean hasAudio() {
+		return hasAudio;
 	}
 
 	public void startBroadcast(final StreamDesc sd, final String sdpOffer, Runnable then) {
@@ -227,9 +391,16 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 		});
 		outgoingMedia.addMediaFlowInStateChangedListener(evt -> log.warn("Media Flow IN :: {}, {}, {}, sid {}, uid {}"
 				, evt.getState(), evt.getMediaType(), evt.getSource(), sid, uid));
-		if (!sipClient) {
+		if (!sipClient && !rtpParticipant) {
 			addListener(sd.getSid(), sd.getUid(), sdpOffer);
 			addSipProcessor(kRoom.getSipCount());
+			// Late-joiner hook: a real (human) participant has just begun
+			// broadcasting. If an AI stand-in in this room already requested a
+			// reverse audio leg but had no participant to graft onto yet, wire it
+			// now. No-op when no reverse leg is armed. Kept inside the
+			// real-participant branch so the stand-in itself (rtpParticipant) and
+			// SIP legs never trigger it.
+			kRoom.onRealParticipantJoined(this);
 		}
 		if (kRoom.isRecording()) {
 			startRecord();
@@ -664,6 +835,15 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 
 	@Override
 	public void release(boolean remove) {
+		// If this participant was carrying an AI stand-in's reverse audio leg,
+		// let the room clear its pointer and re-arm onto another participant.
+		// The endpoint itself is freed by pipeline.release() below (or has
+		// already gone with the pipeline), so we only drop our own reference and
+		// notify -- no explicit disconnect/release needed on this teardown path.
+		final boolean carriedAiReverseLeg = aiReverseRtp != null;
+		if (carriedAiReverseLeg) {
+			aiReverseRtp = null;
+		}
 		if (outgoingMedia != null) {
 			// Must run before outgoingMedia is released below, and before a
 			// disconnecting participant's stream disappears out from under an
@@ -703,6 +883,9 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 			});
 		} else {
 			doRemove(remove);
+		}
+		if (carriedAiReverseLeg) {
+			kRoom.onAiReverseLegParticipantLeft();
 		}
 	}
 
@@ -786,7 +969,7 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 	public void addIceCandidate(IceCandidate candidate, String uid) {
 		if (this.uid.equals(uid)) {
 			if (!(outgoingMedia instanceof WebRtcEndpoint)) {
-				if (!sipClient) {
+				if (!sipClient && !rtpParticipant) {
 					log.info("addIceCandidate iceCandidate while not ready yet, uid: {}, candidate: {}", uid, candidate.getCandidate());
 					candidatesQueue.add(candidate);
 				}

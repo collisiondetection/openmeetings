@@ -32,4 +32,12 @@ public interface IClientManager {
 	Collection<Client> listByUser(Long userId);
 	Client update(Client c);
 	void exit(Client c);
+	// Exposed on the interface so the browser-less RTP-participant manager
+	// (openmeetings-mediaserver, which depends on this interface, not on the
+	// concrete ClientManager in openmeetings-web) can register a synthetic
+	// participant the same way TimerService's SIP path does. Both are already
+	// implemented (public) on the sole implementor, ClientManager, and this
+	// only widens their visibility to the interface -- no behavioural change.
+	void add(Client c);
+	int addToRoom(Client c);
 }

@@ -75,6 +75,15 @@ public class KRoom {
 	private long sipCount = 0;
 	private JSONObject recordingUser = new JSONObject();
 	private JSONObject sharingUser = new JSONObject();
+	// AI stand-in reverse audio leg state (see activateAiStandinReverseLeg).
+	// The stand-in is browser-less, so its media bridge needs the real
+	// participant's audio piped back to it over a dedicated RTP leg. This holds
+	// the bridge's recvonly offer and which real participant's stream currently
+	// carries the leg, so a late-joining or reconnecting participant can be
+	// (re-)wired. Guarded by this KRoom instance's own monitor.
+	private String aiReverseSdpOffer;
+	private boolean aiReverseActive;
+	private String aiReverseWiredStreamUid;
 
 	KRoom(Room r) {
 		this.room = r;
@@ -266,5 +275,98 @@ public class KRoom {
 
 	public long getSipCount() {
 		return sipCount;
+	}
+
+	/**
+	 * Arm an AI stand-in's reverse audio leg for this room and, if a real
+	 * (human) participant is already broadcasting, wire it immediately onto the
+	 * first such participant. The reverse leg is a dedicated {@link org.kurento.client.RtpEndpoint}
+	 * in that participant's own pipeline (see {@link KStream#wireAiReverseLeg}),
+	 * carrying their audio out to the bridge described by {@code reverseSdpOffer}.
+	 *
+	 * @param reverseSdpOffer the bridge's recvonly SDP offer (its listening IP+port)
+	 * @return Kurento's SDP answer if wired now, or {@code null} if deferred
+	 *         because no real participant is broadcasting yet (it will be wired
+	 *         when one joins, via {@link #onRealParticipantJoined})
+	 */
+	public synchronized String activateAiStandinReverseLeg(String reverseSdpOffer) {
+		aiReverseSdpOffer = reverseSdpOffer;
+		aiReverseActive = true;
+		aiReverseWiredStreamUid = null;
+		KStream target = findRealBroadcastingParticipant();
+		if (target == null) {
+			log.info("AI reverse leg armed for room {} but no real participant is broadcasting yet -- deferring", room.getId());
+			return null;
+		}
+		String answer = target.wireAiReverseLeg(reverseSdpOffer);
+		if (answer != null) {
+			aiReverseWiredStreamUid = target.getUid();
+			log.info("AI reverse leg wired immediately in room {} onto participant {}", room.getId(), target.getUid());
+		}
+		return answer;
+	}
+
+	/**
+	 * Tear down this room's AI stand-in reverse leg (called when the stand-in
+	 * ends). Releases the dedicated RtpEndpoint from whichever participant is
+	 * carrying it, if any. Idempotent.
+	 */
+	public synchronized void deactivateAiStandinReverseLeg() {
+		aiReverseActive = false;
+		aiReverseSdpOffer = null;
+		if (aiReverseWiredStreamUid != null) {
+			KStream s = processor.getByUid(aiReverseWiredStreamUid);
+			if (s != null) {
+				s.releaseAiReverseLeg();
+			}
+			aiReverseWiredStreamUid = null;
+		}
+	}
+
+	/**
+	 * Late-joiner hook, called from {@link KStream#internalStartBroadcast} when a
+	 * real (human) participant begins broadcasting. Wires the armed-but-deferred
+	 * reverse leg onto them if one is waiting and nothing already carries it.
+	 */
+	public synchronized void onRealParticipantJoined(KStream stream) {
+		if (!aiReverseActive || aiReverseWiredStreamUid != null) {
+			return;
+		}
+		if (stream.isRtpParticipant() || !stream.hasAudio()) {
+			return;
+		}
+		String answer = stream.wireAiReverseLeg(aiReverseSdpOffer);
+		if (answer != null) {
+			aiReverseWiredStreamUid = stream.getUid();
+			log.info("AI reverse leg wired onto late-joining participant {} in room {}", stream.getUid(), room.getId());
+		}
+	}
+
+	/**
+	 * Called from {@link KStream#release(boolean)} when the participant that was
+	 * carrying the reverse leg leaves. Clears the pointer and, if the stand-in is
+	 * still active, re-wires onto another real participant if one remains.
+	 */
+	public synchronized void onAiReverseLegParticipantLeft() {
+		aiReverseWiredStreamUid = null;
+		if (!aiReverseActive) {
+			return;
+		}
+		KStream target = findRealBroadcastingParticipant();
+		if (target != null) {
+			String answer = target.wireAiReverseLeg(aiReverseSdpOffer);
+			if (answer != null) {
+				aiReverseWiredStreamUid = target.getUid();
+				log.info("AI reverse leg re-wired onto participant {} in room {}", target.getUid(), room.getId());
+			}
+		}
+	}
+
+	private KStream findRealBroadcastingParticipant() {
+		return processor.getByRoom(room.getId())
+				.filter(s -> !s.isRtpParticipant())
+				.filter(KStream::hasAudio)
+				.findFirst()
+				.orElse(null);
 	}
 }
