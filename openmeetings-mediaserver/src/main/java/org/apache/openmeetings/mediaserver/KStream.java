@@ -244,6 +244,14 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 			return null;
 		}
 		RtpEndpoint rtp = new RtpEndpoint.Builder(pipeline).build();
+		// MUST carry the standard outUid/uid tags, not just a custom marker:
+		// KurentoHandler's ObjectCreated watchdog validates every new endpoint by
+		// looking up getByUid(outUid) and checking stream.contains(uid), and
+		// RELEASES any endpoint it can't map to a known stream ("Invalid Endpoint
+		// ... will be dropped"). Tagging with this participant's own uid makes the
+		// reverse endpoint resolve to this stream (this.uid.equals(uid)) so it
+		// survives. (An extra aiReverse marker is added purely for diagnostics.)
+		setTags(rtp, this.uid);
 		rtp.addTag("aiReverse", this.uid);
 		String answer = rtp.processOffer(reverseSdpOffer);
 		outgoingMedia.connect(rtp, MediaType.AUDIO);
