@@ -30,12 +30,39 @@
 	     directly as WebSession.checkHashes() firing twice for one hash, the
 	     second call finding it "already used" and rejecting a session that
 	     had, moments earlier, genuinely authorized.
-	     None is the correct value for this deployment shape; Tomcat's own
-	     Rfc6265CookieProcessor already adds Secure automatically whenever
-	     the triggering request was itself HTTPS (verified: HTTP gets no
-	     Secure, HTTPS gets Secure), so this is a no-op change for
-	     plain-HTTP local dev (Chrome discards a None cookie lacking Secure
-	     and falls back to its own default, i.e. unchanged local behaviour)
-	     and a real fix for HTTPS-fronted staging/production. -->
+
+	     None is correct ONLY for an HTTPS-fronted deployment (the shape
+	     staging/production actually run): the None SameSite attribute is
+	     valid ONLY in combination with Secure, and Tomcat's own
+	     Rfc6265CookieProcessor adds Secure only when the triggering request
+	     was itself HTTPS (verified: HTTP gets no Secure, HTTPS gets Secure).
+
+	     CORRECTION (2026-09-14, SSR-2): an earlier version of this comment
+	     claimed None was a harmless "no-op" over plain HTTP because "Chrome
+	     discards a None cookie lacking Secure and falls back to its own
+	     default." That is FALSE and was the root cause of a hard breakage on
+	     local HTTP dev: a browser does not fall back to a default; it
+	     REJECTS a SameSite=None cookie that lacks Secure outright, storing
+	     nothing. Over plain HTTP (local dev on :5080) Tomcat emits
+	     "JSESSIONID=...; HttpOnly; SameSite=None" with no Secure, the browser
+	     drops it, JSESSIONID is never returned, every request creates a fresh
+	     servlet session (visible as a churning ;jsessionid= URL rewrite and
+	     checkHashes seeing "has soap in session ? false" each time), the
+	     room's stateful WebSocket can never persist, room.js's
+	     /websocket/closed handler fires _reload(), and the room enters an
+	     endless ROOM_ENTER/ROOM_LEAVE page-reload loop, and no video ever
+	     renders. (allowSameURLMultipleTimes only stopped the hash itself
+	     being rejected on the re-entry; it did not fix the session loss.)
+
+	     The value therefore genuinely depends on the deployment's transport
+	     and cannot be a single hardcoded constant for a single image used
+	     across both HTTP and HTTPS. It is left as None here (the correct
+	     default for the HTTPS iframe-embed case that motivated SSR-1), but is
+	     overridable at container start: set OM_SAMESITE_COOKIES=Lax for a
+	     plain-HTTP deployment and om.sh rewrites this attribute before Tomcat
+	     starts (see docker/scripts/om.sh). Lax keeps top-level room entry
+	     working over HTTP; cross-origin iframe embedding fundamentally cannot
+	     work over plain HTTP regardless (the browser forbids a cross-site
+	     cookie without Secure), so no value recovers that case for HTTP. -->
 	<CookieProcessor sameSiteCookies="None" />
 </Context>
