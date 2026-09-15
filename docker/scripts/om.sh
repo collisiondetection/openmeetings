@@ -95,5 +95,12 @@ if [ -n "${OM_SAMESITE_COOKIES}" ]; then
 fi
 echo Current max open files is $(su nobody --shell /bin/bash --command "ulimit -n")
 cd ${OM_HOME}
-sudo --preserve-env=JAVA_OPTS --preserve-env=CATALINA_OPTS -u ${DAEMON_USER} HOME=/tmp ${OM_HOME}/bin/catalina.sh run
+# SINGLE_STREAM_BATCH_JOBDEF: without preserving it, sudo strips it before the
+# JVM starts, so System.getenv("SINGLE_STREAM_BATCH_JOBDEF") returns null and
+# SingleStreamConversionSubmitter silently falls back to the shim's default
+# (the MAIN job definition) instead of the dedicated single-stream one. Found
+# 2026-09-14: functionally harmless today (both job definitions are
+# byte-identical in image/resources/queue), but every single-stream conversion
+# was being cost/log-attributed to the wrong Batch job definition.
+sudo --preserve-env=JAVA_OPTS --preserve-env=CATALINA_OPTS --preserve-env=SINGLE_STREAM_BATCH_JOBDEF -u ${DAEMON_USER} HOME=/tmp ${OM_HOME}/bin/catalina.sh run
 
