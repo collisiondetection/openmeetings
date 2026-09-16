@@ -145,6 +145,25 @@ public class SingleStreamConversionSubmitter {
 				, "-ar", String.valueOf(getAudioRate())
 				, "-b:a", getAudioBitrate()
 				, "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"
+				// Kurento's RecorderEndpoint front-loads the chunk with every
+				// video frame that arrived before the recording clock started,
+				// all clamped to PTS 0, and the FIRST audio packet only appears
+				// after that span in file order (158-423 leading video packets
+				// measured across one real staging load test). The mp4 muxer
+				// cannot write its header until the audio output stream
+				// initializes, so encoded video packets queue while ffmpeg
+				// reads its way to the first audio packet -- and ffmpeg 4.2's
+				// default max_muxing_queue_size is 128 packets, which those
+				// chunks overflow: "Too many packets buffered for output
+				// stream 0:0", exit 1, no mp4. Confirmed live 2026-09-16 (27
+				// of 30 load-test conversions failed; the 3 that passed were
+				// exactly the 3 chunks with the shortest leading span). 9999
+				// packets holds ~11min of 15fps pre-start video (~40MB of
+				// encoded 480x270 h264 worst case) -- far above any real skew,
+				// bounded in memory. The Batch/throttle wrappers inject the
+				// same value when an argv lacks it, so older images stay
+				// covered; this is the proper home for it.
+				, "-max_muxing_queue_size", "9999"
 				// ffmpeg picks its output container by reading the OUTPUT
 				// filename's extension -- ".mp4.part" reads as the unknown
 				// extension ".part" and fails outright ("Unable to choose an
