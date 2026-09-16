@@ -189,7 +189,13 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 			type = Type.AUDIO_ONLY;
 			profile = MediaProfileSpecType.WEBM_AUDIO_ONLY;
 		}
-		pipeline = kHandler.createPipiline(Map.of(TAG_ROOM, String.valueOf(getRoomId()), TAG_STREAM_UID, sd.getUid()), new Continuation<Void>() {
+		kHandler.createPipiline(Map.of(TAG_ROOM, String.valueOf(getRoomId()), TAG_STREAM_UID, sd.getUid()),
+				// Assign the field HERE, synchronously, before the transaction is
+				// even committed -- NOT via this call's return value, which a fast
+				// enough response can race (see createPipiline()'s own doc comment
+				// for the confirmed "proxy is null" NPE this fixes).
+				pipe -> pipeline = pipe,
+				new Continuation<Void>() {
 			@Override
 			public void onSuccess(Void result) throws Exception {
 				try {
@@ -343,7 +349,16 @@ public class KStream extends AbstractStream implements ISipCallbacks {
 				profile = MediaProfileSpecType.WEBM_VIDEO_ONLY;
 				break;
 		}
-		pipeline = kHandler.createPipiline(Map.of(TAG_ROOM, String.valueOf(getRoomId()), TAG_STREAM_UID, sd.getUid()), new Continuation<Void>() {
+		kHandler.createPipiline(Map.of(TAG_ROOM, String.valueOf(getRoomId()), TAG_STREAM_UID, sd.getUid()),
+				// Same fix as startRtpParticipant() above: publish the field
+				// before commit() is dispatched, not from this call's return
+				// value, which a fast enough response can race. This path is
+				// every real browser/SIP join, so the same "proxy is null" NPE
+				// was always latently reachable here too under enough
+				// concurrent load -- just never exercised at the RTP-participant
+				// load test's scale until now.
+				pipe -> pipeline = pipe,
+				new Continuation<Void>() {
 			@Override
 			public void onSuccess(Void result) throws Exception {
 				if (sipClient) {

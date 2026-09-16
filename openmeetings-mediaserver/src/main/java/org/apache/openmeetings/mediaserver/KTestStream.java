@@ -175,7 +175,12 @@ public class KTestStream extends AbstractStream {
 
 	private void createPipeline(Runnable action) {
 		release(false);
-		this.pipeline = kHandler.createPipiline(TAGS, new Continuation<Void>() {
+		// Publish this.pipeline via the onPipelineReady hook, synchronously,
+		// before the transaction commits -- not from the return value, which a
+		// fast enough response can race with the field assignment (same latent
+		// bug fixed in KStream's two callers; see KurentoHandler.createPipiline()'s
+		// own doc comment for the confirmed "proxy is null" NPE this avoids).
+		kHandler.createPipiline(TAGS, pipe -> this.pipeline = pipe, new Continuation<Void>() {
 			@Override
 			public void onSuccess(Void result) throws Exception {
 				action.run();
