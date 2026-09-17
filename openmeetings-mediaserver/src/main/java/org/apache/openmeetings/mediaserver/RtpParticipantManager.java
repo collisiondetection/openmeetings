@@ -89,6 +89,23 @@ public class RtpParticipantManager implements IRtpParticipantManager {
 	// own 15s stop-confirm bound in spirit -- generous, but not unbounded.
 	private static final long JOIN_ANSWER_TIMEOUT_SECONDS = 20;
 
+	/**
+	 * Narrow, explicit test-only allowance -- see {@link #isRoomEmpty(Long)}'s
+	 * doc comment for why this is safe to add without reopening the exact bug
+	 * this class's whole hosting check exists to close. This project's own
+	 * cluster capacity-test tool ({@code loadtest_rtp_participants.php})
+	 * creates a brand-new room per synthetic class with no real browser
+	 * involved at all -- unlike the real AI stand-in, which by design only
+	 * ever joins a room a genuine participant already occupies. That tool
+	 * provisions its own synthetic teacher/student pool users under exactly
+	 * this externalType (never the plugin's real production module value),
+	 * so its join calls -- and ONLY its join calls -- can be told apart from
+	 * every real caller. Keep this string in sync with
+	 * {@code loadtest_rtp_participants.php}'s own LT_EXTERNAL_TYPE constant
+	 * if either side ever changes.
+	 */
+	private static final String LOADTEST_EXTERNAL_TYPE = "mod_tutorship_loadtest";
+
 	@Inject
 	private KurentoHandler kHandler;
 	@Inject
@@ -167,6 +184,22 @@ public class RtpParticipantManager implements IRtpParticipantManager {
 		return cm.streamByRoom(roomId).anyMatch(c -> myServerId.equals(c.getServerId()));
 	}
 
+	/**
+	 * Whether room {@code roomId} currently has NO client anywhere in the
+	 * cluster -- genuinely fresh, not merely "hosted on some other node".
+	 * {@link #isRoomHostedLocally(Long)} alone cannot tell these two cases
+	 * apart: an unhosted room and a room hosted elsewhere both report false
+	 * there, since neither has a client matching THIS node's server id. This
+	 * second check is what makes {@link #LOADTEST_EXTERNAL_TYPE}'s bootstrap
+	 * allowance in {@link #join} safe to add without reopening the exact bug
+	 * the hosting check exists to close -- it only ever applies to a room
+	 * with truly zero occupants anywhere, never one already properly hosted
+	 * on a sibling node.
+	 */
+	private boolean isRoomEmpty(Long roomId) {
+		return cm.streamByRoom(roomId).findAny().isEmpty();
+	}
+
 	@Override
 	public RtpParticipantJoinResult join(Long roomId, String externalId, String externalType, boolean videoEnabled, int width, int height, String sdpOffer, String reverseSdpOffer, long maxDurationSeconds) {
 		// Bind the Wicket Application to this (webservice request) thread --
@@ -192,7 +225,22 @@ public class RtpParticipantManager implements IRtpParticipantManager {
 			// spending real external media-bridge time for nothing. Same
 			// fail-closed stance WbWebService.startRecording() already takes
 			// for the identical bug class.
-			throw new IllegalStateException("Room " + roomId + " is not hosted on this OpenMeetings node -- retry against the node currently hosting it");
+			//
+			// The one narrow exception: this project's own load-test tool
+			// creates a brand-new room with no real browser ever involved, so
+			// isRoomHostedLocally() would refuse it on EVERY node -- there is
+			// no real host anywhere yet to prove. Only its own distinctly-
+			// tagged externalType, and only for a room that is ALSO genuinely
+			// empty everywhere (isRoomEmpty(), not merely "not on my node"),
+			// is allowed to bootstrap -- see LOADTEST_EXTERNAL_TYPE's own doc
+			// comment. Every real caller (a real student/teacher's browser,
+			// the AI stand-in, the class recorder) is completely unaffected:
+			// none of them is ever provisioned under this externalType.
+			if (LOADTEST_EXTERNAL_TYPE.equals(externalType) && isRoomEmpty(roomId)) {
+				log.info("RTP participant: load-test bootstrap of empty room {} via this node (externalId {})", roomId, externalId);
+			} else {
+				throw new IllegalStateException("Room " + roomId + " is not hosted on this OpenMeetings node -- retry against the node currently hosting it");
+			}
 		}
 		KRoom kRoom = kHandler.getRoom(roomId);
 		if (kRoom == null) {
