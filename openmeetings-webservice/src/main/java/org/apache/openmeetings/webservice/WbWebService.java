@@ -49,7 +49,9 @@ import jakarta.ws.rs.core.MediaType;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.io.FileUtils;
 import org.apache.cxf.feature.Features;
+import org.apache.openmeetings.IApplication;
 import org.apache.openmeetings.db.dto.basic.ServiceResult;
+
 import org.apache.openmeetings.db.dto.basic.ServiceResult.Type;
 import org.apache.openmeetings.db.dto.room.Whiteboard;
 import org.apache.openmeetings.db.dto.room.Whiteboards;
@@ -59,6 +61,7 @@ import org.apache.openmeetings.db.entity.room.Room.RoomElement;
 import org.apache.openmeetings.db.entity.user.User;
 import org.apache.openmeetings.db.manager.IClientManager;
 import org.apache.openmeetings.db.manager.IWhiteboardManager;
+import org.apache.openmeetings.db.util.ApplicationHelper;
 import org.apache.openmeetings.service.room.WbRecordingManager;
 import org.apache.openmeetings.webservice.error.ServiceException;
 import org.apache.openmeetings.webservice.schema.ServiceResultWrapper;
@@ -277,6 +280,46 @@ public class WbWebService extends BaseWebService {
 		});
 	}
 
+	/**
+	 * Whether THIS node currently hosts room {@code roomId}'s live media --
+	 * i.e. whether any client presently in the room is connected via this
+	 * same OpenMeetings node.
+	 *
+	 * <p>Needed because {@link WbRecordingManager}'s recording state is plain
+	 * in-JVM memory (see its own class doc, "Single-node only"): whiteboard
+	 * events only ever append on whichever node's WbWebSocketHelper actually
+	 * processes them for a given room. On a clustered deployment, calling
+	 * startRecording against a node that does NOT host the room used to
+	 * silently create a plausible-looking JSONL log (a valid file path, a
+	 * SUCCESS result) that would never receive a single real event -- worse
+	 * than an outright failure, since nothing about the response told the
+	 * caller anything was wrong. Confirmed live against a real 2-node staging
+	 * cluster before this check existed: a room genuinely hosted on node 2
+	 * still returned SUCCESS (and a real, if permanently empty, log file)
+	 * when startRecording was called against node 1.
+	 *
+	 * <p>{@link org.apache.openmeetings.db.entity.basic.Client#getServerId()}
+	 * is set exactly once, at connection time
+	 * ({@code ClientManager.add()}, openmeetings-web), to the literal node
+	 * that client is actually connected through -- and that {@code Client}
+	 * object is then replicated cluster-wide via Hazelcast, so this check
+	 * gives the correct answer from EITHER node, not only the hosting one.
+	 * Every client in a room is always on the SAME node (OM's own join-time
+	 * redirect, {@code ClientManager.getServerUrl()}, routes a NEW joiner to
+	 * whichever node already hosts the room), so a single match is
+	 * sufficient evidence. An empty room (nobody currently connected on ANY
+	 * node) correctly reports "not hosted here" everywhere -- there is no
+	 * real host to claim in that state, and refusing to start a recording of
+	 * a room nobody is in is the same fail-closed stance
+	 * {@code SingleStreamRecordingManager.startSingle()} already takes for an
+	 * absent participant.
+	 */
+	private boolean isRoomHostedLocally(long roomId) {
+		IApplication app = ApplicationHelper.ensureApplication();
+		String myServerId = app.getServerId();
+		return cm.streamByRoom(roomId).anyMatch(c -> myServerId.equals(c.getServerId()));
+	}
+
 	private static JSONObject snapshot(Whiteboards wbs) {
 		JSONObject boards = new JSONObject();
 		for (Map.Entry<Long, Whiteboard> e : wbs.getWhiteboards().entrySet()) {
@@ -315,6 +358,17 @@ public class WbWebService extends BaseWebService {
 	{
 		log.debug("[startRecording] room id {}", id);
 		return performCall(sid, User.Right.SOAP, sd -> {
+			if (!isRoomHostedLocally(id)) {
+				// Refuse rather than silently create a dead log -- see
+				// isRoomHostedLocally()'s own doc for exactly what this
+				// guards against. The caller (a Moodle scheduled task, on a
+				// clustered deployment) is expected to retry against the
+				// node that actually hosts the room -- see
+				// tutorship_get_om_node_configs() / the try-each-node
+				// pattern already used for participant recording.
+				log.info("[startRecording] refused: room {} is not hosted on this OpenMeetings node", id);
+				return new ServiceResult("Room " + id + " is not hosted on this OpenMeetings node -- retry against the node currently hosting it", Type.ERROR);
+			}
 			try {
 				String path = WbRecordingManager.start(id, snapshot(wbManager.get(id)));
 				return new ServiceResult(path, Type.SUCCESS);
@@ -350,6 +404,33 @@ public class WbWebService extends BaseWebService {
 	{
 		log.debug("[stopRecording] room id {}", id);
 		return performCall(sid, User.Right.SOAP, sd -> {
+			// Deliberately NOT gated on isRoomHostedLocally(): by the time a
+			// session genuinely ends, every participant may already have
+			// left, which would make the client-presence check above refuse
+			// on the very node that holds the real ACTIVE recording -- the
+			// opposite of what startRecording() needs. The precise, empty-
+			// room-proof local truth is simply whether THIS node's own
+			// WbRecordingManager has anything active for this room -- that
+			// can only be true here if start() was accepted here (post the
+			// isRoomHostedLocally() fix above), so it is exactly as reliable
+			// a locality signal without the false-refusal risk.
+			//
+			// A caller for whom this ambiguity actually matters (was this a
+			// real stop, or a harmless no-op because the recording lives on
+			// a different node?) is expected to call stopRecording against
+			// EVERY cluster node, same as TOmGateway::stopStreamRecordingBatch()
+			// already does for participant recording -- so the no-op case
+			// below stays a SUCCESS, not an ERROR, to keep that "call
+			// everywhere, harmless where it wasn't running" pattern working.
+			// It is not the SAME message as a genuine stop, though: an
+			// earlier version of this method returned "Stopped" unconditionally
+			// even when nothing was active here, which is the same silent
+			// false-positive class of bug isRoomHostedLocally() exists to
+			// close on the start side.
+			if (!WbRecordingManager.isRecording(id)) {
+				return new ServiceResult("No active whiteboard recording on this node for room " + id
+						+ " (already stopped, never started, or hosted on a different node)", Type.SUCCESS);
+			}
 			try {
 				// Export while still ACTIVE and still LIVE -- both the session's
 				// own log (covers file objects created DURING this recording) and
@@ -375,6 +456,16 @@ public class WbWebService extends BaseWebService {
 
 	/**
 	 * Reports whether this room's whiteboard event stream is currently being persisted.
+	 *
+	 * <p>Node-local, same caveat as {@link WbRecordingManager}'s own class doc:
+	 * this reports whether recording is active in THIS JVM's memory, not
+	 * cluster-wide. A "false" from a non-hosting node does not mean the room
+	 * isn't being recorded -- it may simply be recording on a different
+	 * node. Nothing in this codebase currently calls this method to decide
+	 * whether to start/stop, so that ambiguity is not (yet) a correctness
+	 * bug the way it was for startRecording/stopRecording above -- but a
+	 * future caller relying on this for a cluster-wide answer would need to
+	 * query every node, the same way stopRecording's own callers must.
 	 *
 	 * @param sid - The SID of the User. This SID must be marked as Loggedin
 	 * @param id - id of the room to check
