@@ -32,6 +32,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
+import org.apache.openmeetings.IApplication;
 import org.apache.openmeetings.db.dao.user.UserDao;
 import org.apache.openmeetings.db.dto.room.RtpParticipantJoinResult;
 import org.apache.openmeetings.db.entity.basic.Client;
@@ -132,6 +133,40 @@ public class RtpParticipantManager implements IRtpParticipantManager {
 		}
 	}
 
+	/**
+	 * Whether THIS node currently hosts room {@code roomId}'s live media --
+	 * i.e. whether any client presently in the room is connected via this
+	 * same OpenMeetings node. Identical rationale and mechanism to
+	 * {@code WbWebService.isRoomHostedLocally()} (same commit night, same bug
+	 * class): {@link KurentoHandler#getRoom(Long)}'s backing map is plain
+	 * in-JVM memory populated by {@code computeIfAbsent}, so on a clustered
+	 * deployment it NEVER returns null for a real room id -- it fabricates a
+	 * fresh, empty {@link KRoom} on whichever node receives the call, rather
+	 * than reporting "not hosted here". A caller who does not know which
+	 * node actually hosts a room (this manager's only real caller, the
+	 * Moodle plugin's AI-stand-in join path, tries every configured node in
+	 * turn) needs THIS node to refuse cleanly when it is not the real host,
+	 * or it will silently succeed into a phantom room nobody else is in.
+	 *
+	 * <p>{@link org.apache.openmeetings.db.entity.basic.Client#getServerId()}
+	 * is set once, at connection time, to the literal node a client is
+	 * actually connected through, and that {@code Client} object is
+	 * replicated cluster-wide via Hazelcast -- so this check is accurate from
+	 * EITHER node, not only the hosting one. Every client in a room is always
+	 * on the SAME node (OM's own join-time redirect routes a new joiner to
+	 * whichever node already hosts the room), so a single match is
+	 * sufficient evidence. An empty room (nobody connected anywhere) reports
+	 * "not hosted here" on every node -- there is no real host to claim, and
+	 * that is the fail-closed answer for a room the AI stand-in should never
+	 * be joining anyway (its own trigger already requires a real participant
+	 * to be present first).
+	 */
+	private boolean isRoomHostedLocally(Long roomId) {
+		IApplication app = ensureApplication();
+		String myServerId = app.getServerId();
+		return cm.streamByRoom(roomId).anyMatch(c -> myServerId.equals(c.getServerId()));
+	}
+
 	@Override
 	public RtpParticipantJoinResult join(Long roomId, String externalId, String externalType, boolean videoEnabled, int width, int height, String sdpOffer, String reverseSdpOffer, long maxDurationSeconds) {
 		// Bind the Wicket Application to this (webservice request) thread --
@@ -142,6 +177,22 @@ public class RtpParticipantManager implements IRtpParticipantManager {
 		ensureApplication();
 		if (!kHandler.isConnected()) {
 			throw new IllegalStateException("Media server is not connected");
+		}
+		if (!isRoomHostedLocally(roomId)) {
+			// See isRoomHostedLocally()'s own doc for exactly what this guards
+			// against: kHandler.getRoom() below NEVER returns null for a real
+			// room id (computeIfAbsent always fabricates a fresh, empty KRoom
+			// on whichever node receives the call), so the "No room" check
+			// that used to sit here was unreachable dead code -- confirmed
+			// live 2026-09-17 against the real 2-node staging cluster: a room
+			// genuinely hosted on node2 (10.0.0.70) still returned SUCCESS,
+			// with a real Kurento SDP answer pointing at node1's OWN Kurento
+			// (10.0.0.159) -- a fully negotiated but completely isolated
+			// phantom room nobody else could ever see or hear, silently
+			// spending real external media-bridge time for nothing. Same
+			// fail-closed stance WbWebService.startRecording() already takes
+			// for the identical bug class.
+			throw new IllegalStateException("Room " + roomId + " is not hosted on this OpenMeetings node -- retry against the node currently hosting it");
 		}
 		KRoom kRoom = kHandler.getRoom(roomId);
 		if (kRoom == null) {
