@@ -24,6 +24,7 @@ import static org.apache.openmeetings.web.pages.auth.SignInPage.TOKEN_PARAM;
 
 import java.io.Serializable;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -360,8 +361,88 @@ public class ClientManager implements IClientManager {
 			return getServerUrl(existing.get(), r, generator);
 		}
 		Optional<Map.Entry<String, ServerInfo>> min = onlineServers.entrySet().stream()
+				.filter(e -> !e.getValue().isDraining())
 				.min((e1, e2) -> e1.getValue().getCapacity() - e2.getValue().getCapacity());
+		if (min.isEmpty()) {
+			// Every known server is draining. Fail OPEN rather than NPE on
+			// min.get() below -- a room must still be creatable somewhere, and
+			// an operator who drained every node at once has made a decision
+			// this balancer should not veto by hanging. Same fail-open stance
+			// as this project's own Redis-MUC-cache fallback elsewhere: a
+			// safety mechanism degrading to today's undrained behaviour, not a
+			// mechanism that can make things WORSE than having no drain at all.
+			log.warn("Cluster:: every known server is draining -- ignoring drain state for this assignment");
+			min = onlineServers.entrySet().stream()
+					.min((e1, e2) -> e1.getValue().getCapacity() - e2.getValue().getCapacity());
+		}
 		return getServerUrl(min.get(), r, generator);
+	}
+
+	/**
+	 * See {@link IClientManager#serverRoomsByUrl()}. Reads the same
+	 * {@code onlineServers} map {@link #getServerUrl(Room, UnaryOperator)}'s
+	 * balancer consults -- a defensive copy of each server's room-id set, so a
+	 * caller iterating the result can't observe a concurrent mutation of the
+	 * live {@link ServerInfo}.
+	 */
+	@Override
+	public Map<String, Set<Long>> serverRoomsByUrl() {
+		Map<String, Set<Long>> result = new HashMap<>();
+		for (ServerInfo si : onlineServers.values()) {
+			result.put(si.getUrl(), Set.copyOf(si.getRooms()));
+		}
+		return result;
+	}
+
+	/**
+	 * See {@link IClientManager#serverDrainingByUrl()}.
+	 */
+	@Override
+	public Map<String, Boolean> serverDrainingByUrl() {
+		Map<String, Boolean> result = new HashMap<>();
+		for (ServerInfo si : onlineServers.values()) {
+			result.put(si.getUrl(), si.isDraining());
+		}
+		return result;
+	}
+
+	/**
+	 * See {@link IClientManager#setDraining(boolean)}. Acts on THIS node
+	 * (whichever server actually receives the call) -- the same
+	 * "acts on whichever node is asked" convention {@code
+	 * RtpParticipantManager.isRoomHostedLocally()} already establishes for
+	 * this fork's other additions, so a caller drains a specific node simply
+	 * by calling its own address, with no OM-internal server id to look up or
+	 * pass around. Locks the shared entry for the read-modify-write, same
+	 * pattern {@link #exitRoom(Client, boolean)} already uses for
+	 * {@code ServerInfo} mutation.
+	 */
+	@Override
+	public void setDraining(boolean draining) {
+		String serverId = app.getServerId();
+		IMap<String, ServerInfo> srv = servers();
+		srv.lock(serverId);
+		try {
+			ServerInfo si = srv.get(serverId);
+			si.setDraining(draining);
+			srv.put(serverId, si);
+			onlineServers.put(serverId, si);
+			log.info("Cluster:: server '{}' draining set to {}", serverId, draining);
+		} finally {
+			srv.unlock(serverId);
+		}
+	}
+
+	/**
+	 * See {@link IClientManager#isDraining()}. Reflects THIS node's own
+	 * locally-cached copy of its {@code ServerInfo} -- always up to date for
+	 * self, since {@link #setDraining(boolean)} writes {@code onlineServers}
+	 * synchronously in the same call that updates the replicated map.
+	 */
+	@Override
+	public boolean isDraining() {
+		ServerInfo si = onlineServers.get(app.getServerId());
+		return si != null && si.isDraining();
 	}
 
 	Optional<InstantToken> getToken(StringValue uuid) {
@@ -434,9 +515,23 @@ public class ClientManager implements IClientManager {
 		private int capacity = 0;
 		private final String url;
 		private final Set<Long> rooms = new HashSet<>();
+		// Not yet consulted anywhere except getServerUrl()'s new-room balancer
+		// filter -- already-hosted rooms (the existing.isPresent() branch just
+		// above) keep routing here untouched while draining, which is exactly
+		// the desired semantics: stop taking NEW rooms, don't disturb what is
+		// already running.
+		private boolean draining = false;
 
 		public ServerInfo(String url) {
 			this.url = url;
+		}
+
+		public boolean isDraining() {
+			return draining;
+		}
+
+		public void setDraining(boolean draining) {
+			this.draining = draining;
 		}
 
 		public void add(Room r) {

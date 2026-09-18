@@ -43,6 +43,7 @@
 	<jaxrs:server id="server" address="/">
 		<jaxrs:serviceBeans>
 			<ref bean="calendarWebService"/>
+			<ref bean="clusterInfoWebService"/> <!-- JaxRs only -->
 			<ref bean="errorWebService"/>
 			<ref bean="fileWebService"/>
 			<ref bean="groupWebService"/>

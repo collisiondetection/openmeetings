@@ -19,6 +19,8 @@
 package org.apache.openmeetings.db.manager;
 
 import java.util.Collection;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.apache.openmeetings.db.entity.basic.Client;
@@ -40,4 +42,27 @@ public interface IClientManager {
 	// only widens their visibility to the interface -- no behavioural change.
 	void add(Client c);
 	int addToRoom(Client c);
+	// Read-only cluster room-topology snapshot: every currently-known server's
+	// own base URL (the same value used to build cross-node redirects, see
+	// getServerUrl()) mapped to the set of room ids it presently hosts. Backed
+	// by the same Hazelcast-replicated per-server state getServerUrl()'s
+	// balancer already reads, so it is accurate from ANY node, not only the
+	// one actually asked -- exposed for ClusterInfoWebService, which exists so
+	// callers (ais4_join.php, wb_recording_manage.php,
+	// participant_recording_manage.php) can look up the right node directly
+	// instead of trying every configured node in turn.
+	Map<String, Set<Long>> serverRoomsByUrl();
+	// Every currently-known server's own base URL mapped to whether it is
+	// currently marked draining (excluded from getServerUrl()'s NEW-room
+	// balancer pick, but not from rooms it already hosts). Researched
+	// 2026-09-18 as the closing piece for a safe elastic-node-fleet scale-down
+	// -- see CLAUDE.md's OM node-elasticity research section -- but usable
+	// standing on its own for a manual "stop sending this node new classes"
+	// operator action even before any fleet automation exists.
+	Map<String, Boolean> serverDrainingByUrl();
+	// Marks/unmarks THIS node (whichever server actually receives the call --
+	// see ClientManager.setDraining()'s own doc) as draining.
+	void setDraining(boolean draining);
+	// Whether THIS node is currently marked draining.
+	boolean isDraining();
 }
