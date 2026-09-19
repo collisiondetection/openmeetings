@@ -55,12 +55,13 @@ public class ClusterTopologyResponse extends ServiceResult {
 		super(message, type);
 	}
 
-	public ClusterTopologyResponse(Map<String, Set<Long>> serverRoomsByUrl, Map<String, Boolean> serverDrainingByUrl) {
+	public ClusterTopologyResponse(Map<String, Set<Long>> serverRoomsByUrl, Map<String, Boolean> serverDrainingByUrl, String selfUrl) {
 		super("", Type.SUCCESS);
 		this.servers = new ArrayList<>();
 		for (Map.Entry<String, Set<Long>> e : serverRoomsByUrl.entrySet()) {
 			boolean draining = Boolean.TRUE.equals(serverDrainingByUrl.get(e.getKey()));
-			servers.add(new ServerRoomInfo(e.getKey(), new ArrayList<>(e.getValue()), draining));
+			boolean isSelf = e.getKey().equals(selfUrl);
+			servers.add(new ServerRoomInfo(e.getKey(), new ArrayList<>(e.getValue()), draining, isSelf));
 		}
 	}
 
@@ -77,15 +78,17 @@ public class ClusterTopologyResponse extends ServiceResult {
 		private String url;
 		private List<Long> roomIds;
 		private boolean draining;
+		private boolean isSelf;
 
 		public ServerRoomInfo() {
 			//def constructor
 		}
 
-		public ServerRoomInfo(String url, List<Long> roomIds, boolean draining) {
+		public ServerRoomInfo(String url, List<Long> roomIds, boolean draining, boolean isSelf) {
 			this.url = url;
 			this.roomIds = roomIds;
 			this.draining = draining;
+			this.isSelf = isSelf;
 		}
 
 		public String getUrl() {
@@ -110,6 +113,14 @@ public class ClusterTopologyResponse extends ServiceResult {
 
 		public void setDraining(boolean draining) {
 			this.draining = draining;
+		}
+
+		public boolean isSelf() {
+			return isSelf;
+		}
+
+		public void setSelf(boolean isSelf) {
+			this.isSelf = isSelf;
 		}
 	}
 }

@@ -65,4 +65,10 @@ public interface IClientManager {
 	void setDraining(boolean draining);
 	// Whether THIS node is currently marked draining.
 	boolean isDraining();
+	// THIS node's own base URL (or null if it has no ServerInfo entry yet,
+	// e.g. single-node/non-clustered mode) -- lets a caller identify which
+	// topology entry corresponds to the specific node it just called, since
+	// nothing else ties this URL back to the caller's own internal
+	// host:port config for that node.
+	String selfUrl();
 }

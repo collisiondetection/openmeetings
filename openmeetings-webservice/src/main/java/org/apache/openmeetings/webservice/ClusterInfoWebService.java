@@ -106,7 +106,8 @@ public class ClusterInfoWebService extends BaseWebService {
 			) throws ServiceException
 	{
 		return performCall(sid, User.Right.SOAP, sd -> {
-			ClusterTopologyResponse resp = new ClusterTopologyResponse(clientManager.serverRoomsByUrl(), clientManager.serverDrainingByUrl());
+			ClusterTopologyResponse resp = new ClusterTopologyResponse(
+					clientManager.serverRoomsByUrl(), clientManager.serverDrainingByUrl(), clientManager.selfUrl());
 			log.debug("[clusterinfo topology] {} server(s)", resp.getServers().size());
 			return resp;
 		});

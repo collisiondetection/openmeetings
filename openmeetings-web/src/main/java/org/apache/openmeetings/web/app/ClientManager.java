@@ -407,6 +407,21 @@ public class ClientManager implements IClientManager {
 	}
 
 	/**
+	 * See {@link IClientManager#selfUrl()}. THIS node's own base URL --
+	 * the caller-facing "which of these topology entries is the one I
+	 * actually called" signal, since a caller (Moodle) identifies nodes by
+	 * an internal host:port it configures for REST calls, which has no
+	 * reliable relationship to this URL (OM's own advertised, browser-facing
+	 * redirect address) -- there is no shared identifier to correlate the
+	 * two other than "the node that answered this specific request".
+	 */
+	@Override
+	public String selfUrl() {
+		ServerInfo si = onlineServers.get(app.getServerId());
+		return si == null ? null : si.getUrl();
+	}
+
+	/**
 	 * See {@link IClientManager#setDraining(boolean)}. Acts on THIS node
 	 * (whichever server actually receives the call) -- the same
 	 * "acts on whichever node is asked" convention {@code
