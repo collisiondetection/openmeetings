@@ -29,6 +29,8 @@ import static org.apache.openmeetings.util.OpenmeetingsVariables.getAudioRate;
 import static org.apache.openmeetings.util.OpenmeetingsVariables.getVideoPreset;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -115,8 +117,19 @@ public class SingleStreamConversionSubmitter {
 		}
 		File streamsDir = getStreamsSubDir(roomId);
 		File outDir = new File(streamsDir, "single");
-		if (!outDir.exists() && !outDir.mkdirs()) {
-			log.error("Could not create single-stream output dir {}", outDir);
+		// A room's teacher+student stops are adjacent in a batch-stop caller's
+		// work list and can be dispatched within 0-1ms of each other -- the old
+		// exists()/mkdirs() check-then-act pair raced on EFS's multi-millisecond
+		// mkdir round-trip: the loser's mkdirs() returned false purely because
+		// the winner had already created the directory, and got misreported as
+		// a conversion failure even though the winner's own conversion (into
+		// this same directory) succeeded. createDirectories() is race-free by
+		// contract -- it only throws if creation genuinely fails or the path
+		// already exists as a non-directory.
+		try {
+			Files.createDirectories(outDir.toPath());
+		} catch (IOException e) {
+			log.error("Could not create single-stream output dir {}", outDir, e);
 			return null;
 		}
 		// This mp4 is read by a DIFFERENT process (Moodle, in a different

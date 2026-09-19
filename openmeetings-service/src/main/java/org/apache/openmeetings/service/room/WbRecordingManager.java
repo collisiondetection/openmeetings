@@ -211,8 +211,14 @@ public final class WbRecordingManager {
 			return;
 		}
 		File assetsDir = new File(OmFileHelper.getStreamsSubDir(roomId), "assets");
-		if (!assetsDir.exists() && !assetsDir.mkdirs()) {
-			log.warn("Could not create assets dir {}", assetsDir.getAbsolutePath());
+		// Same check-then-act race as SingleStreamConversionSubmitter's old
+		// output-dir creation (see its own comment) -- fixed the same way,
+		// preventively, even though this path is effectively single-threaded
+		// per room today.
+		try {
+			Files.createDirectories(assetsDir.toPath());
+		} catch (IOException e) {
+			log.warn("Could not create assets dir {}", assetsDir.getAbsolutePath(), e);
 			return;
 		}
 		OmFileHelper.markWorldTraversable(assetsDir);
