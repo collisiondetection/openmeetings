@@ -103,8 +103,30 @@ public class RtpParticipantManager implements IRtpParticipantManager {
 	 * every real caller. Keep this string in sync with
 	 * {@code loadtest_rtp_participants.php}'s own LT_EXTERNAL_TYPE constant
 	 * if either side ever changes.
+	 *
+	 * <p>Matching the externalType string alone is NOT the actual gate --
+	 * {@link #LOADTEST_BOOTSTRAP_ALLOWED} is. A string constant costs nothing
+	 * to reproduce: anyone who can call this webservice at all can claim any
+	 * externalType they like, so on its own this would let a caller against a
+	 * PRODUCTION deployment bootstrap an empty room too, just by sending the
+	 * right string -- a real, if narrow, hole in the fail-closed hosting
+	 * check this whole class exists to enforce.
 	 */
 	private static final String LOADTEST_EXTERNAL_TYPE = "mod_tutorship_loadtest";
+
+	/**
+	 * The real gate for the allowance above -- read once from the
+	 * {@code OM_ALLOW_LOADTEST_BOOTSTRAP} environment variable at class load,
+	 * matching this fork's existing container-config pattern ({@code OM_DB_PASS},
+	 * {@code SINGLE_STREAM_BATCH_JOBDEF}, etc. -- all env-var driven, all set
+	 * per-environment in {@code om_init.sh.tpl}). Staging's boot script sets
+	 * this to {@code "true"}; production's never sets it at all, so this is
+	 * {@code false} there regardless of what any caller claims. Deliberately
+	 * NOT a Moodle-plugin-supplied parameter -- the whole point is that this
+	 * node's own operator decides whether it will ever honour the bootstrap
+	 * allowance, independent of anything a webservice caller sends.
+	 */
+	private static final boolean LOADTEST_BOOTSTRAP_ALLOWED = "true".equalsIgnoreCase(System.getenv("OM_ALLOW_LOADTEST_BOOTSTRAP"));
 
 	@Inject
 	private KurentoHandler kHandler;
@@ -236,7 +258,15 @@ public class RtpParticipantManager implements IRtpParticipantManager {
 			// comment. Every real caller (a real student/teacher's browser,
 			// the AI stand-in, the class recorder) is completely unaffected:
 			// none of them is ever provisioned under this externalType.
-			if (LOADTEST_EXTERNAL_TYPE.equals(externalType) && isRoomEmpty(roomId)) {
+			//
+			// LOADTEST_BOOTSTRAP_ALLOWED is the actual gate, not the string
+			// match alone -- a caller can always CLAIM this externalType, so
+			// without this node-level flag a production deployment would
+			// honour the same bootstrap request from anyone who sent the
+			// right string. Production's boot script never sets the
+			// OM_ALLOW_LOADTEST_BOOTSTRAP env var, so this is unconditionally
+			// false there.
+			if (LOADTEST_BOOTSTRAP_ALLOWED && LOADTEST_EXTERNAL_TYPE.equals(externalType) && isRoomEmpty(roomId)) {
 				log.info("RTP participant: load-test bootstrap of empty room {} via this node (externalId {})", roomId, externalId);
 			} else {
 				throw new IllegalStateException("Room " + roomId + " is not hosted on this OpenMeetings node -- retry against the node currently hosting it");
