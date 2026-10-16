@@ -20,6 +20,7 @@ package org.apache.openmeetings.service.room;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -28,6 +29,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 
@@ -36,9 +38,12 @@ import org.apache.openmeetings.db.entity.basic.ChatMessage;
 import org.apache.openmeetings.db.entity.file.BaseFileItem;
 import org.apache.openmeetings.db.entity.user.User;
 import org.apache.openmeetings.util.OmFileHelper;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.github.openjson.JSONArray;
 import com.github.openjson.JSONObject;
@@ -58,23 +63,111 @@ import com.github.openjson.JSONObject;
  * Isolated from any real OM install via OmFileHelper.setOmHome() pointing at a
  * throwaway temp directory, and a high, unlikely-to-collide room id -- this
  * never touches a real streams/ directory.
+ *
+ * setOmHome() mutates STATIC state shared by every test class in the surefire
+ * JVM, and honours a {@code DATA_DIR} system property by pointing dataHome (so
+ * the streams/ directory) at that REAL directory instead of the temp one. So,
+ * exactly like its sibling {@code TestSingleStreamConversionSubmitter}, the
+ * previous omHome/dataHome values are saved and restored around every test, and
+ * {@code DATA_DIR} is cleared for the duration and put back afterwards -- this
+ * class must neither write into a real data dir nor leak a temp-dir omHome into
+ * the test classes that run after it. Unlike its sibling this class also proves
+ * that on every run, instead of relying on someone passing -DDATA_DIR=...: a
+ * {@code @BeforeAll} plants a DATA_DIR pointing at an empty "poison" directory
+ * and records the statics, and the {@code @AfterAll} asserts that nothing was
+ * written under the poison directory and that DATA_DIR/omHome/dataHome are
+ * exactly as they were found.
+ *
+ * NAMED {@code Test*} ON PURPOSE: the root pom's surefire config only runs
+ * classes whose file name starts with "Test" (upstream OpenMeetings' own
+ * convention). This class used to be called {@code WbRecordingManagerTest},
+ * which does not match, so its tests never ran in any build. Do not rename it
+ * back (or add a test class whose name does not start with "Test").
  */
-class WbRecordingManagerTest {
+class TestWbRecordingManager {
 	private static final Long ROOM_ID = 999999L;
+
+	// Class-level bookkeeping for the isolation self-check (see class comment).
+	private static Object classOmHome;
+	private static Object classDataHome;
+	private static String classDataDirProperty;
+	private static File poisonDataDir;
+
 	private File tempHome;
+	private Object savedOmHome;
+	private Object savedDataHome;
+	private String savedDataDirProperty;
+
+	@BeforeAll
+	static void plantPoisonDataDirAndRecordStatics() throws Exception {
+		classOmHome = ReflectionTestUtils.getField(OmFileHelper.class, "omHome");
+		classDataHome = ReflectionTestUtils.getField(OmFileHelper.class, "dataHome");
+		classDataDirProperty = System.getProperty("DATA_DIR");
+		// A real, empty directory standing in for "the data dir of a real OM
+		// install that DATA_DIR points at". If setUp() ever stops clearing
+		// DATA_DIR, setOmHome() aims dataHome here and the tests below fail.
+		poisonDataDir = Files.createTempDirectory("wbrec-poison-datadir").toFile();
+		System.setProperty("DATA_DIR", poisonDataDir.getAbsolutePath());
+	}
+
+	@AfterAll
+	static void assertIsolationHeldAndRestoreEnvironment() {
+		try {
+			assertEquals(poisonDataDir.getAbsolutePath(), System.getProperty("DATA_DIR")
+					, "DATA_DIR was not put back to the value it had before each test");
+			assertSame(classOmHome, ReflectionTestUtils.getField(OmFileHelper.class, "omHome")
+					, "OmFileHelper.omHome leaked out of this test class");
+			assertSame(classDataHome, ReflectionTestUtils.getField(OmFileHelper.class, "dataHome")
+					, "OmFileHelper.dataHome leaked out of this test class");
+			String[] written = poisonDataDir.list();
+			assertNotNull(written);
+			assertEquals(0, written.length, "a test wrote under the DATA_DIR directory instead of its temp home: "
+					+ Arrays.toString(written));
+		} finally {
+			if (classDataDirProperty == null) {
+				System.clearProperty("DATA_DIR");
+			} else {
+				System.setProperty("DATA_DIR", classDataDirProperty);
+			}
+			deleteRecursively(poisonDataDir);
+		}
+	}
 
 	@BeforeEach
 	void setUp() throws Exception {
+		// OmFileHelper keeps omHome/dataHome in private statics with no getter
+		// for dataHome (and getOmHome() may be null), so save the raw fields in
+		// order to restore them exactly, null included.
+		savedOmHome = ReflectionTestUtils.getField(OmFileHelper.class, "omHome");
+		savedDataHome = ReflectionTestUtils.getField(OmFileHelper.class, "dataHome");
+		// setOmHome() honours DATA_DIR; if it were set the streams directory
+		// would point at a real data dir and the tests would write into it.
+		savedDataDirProperty = System.getProperty("DATA_DIR");
+		System.clearProperty("DATA_DIR");
+
 		tempHome = Files.createTempDirectory("wbrec-test").toFile();
 		OmFileHelper.setOmHome(tempHome);
+		// Guard: nothing this test writes may land outside the temp dir.
+		assertTrue(OmFileHelper.getStreamsDir().toPath().startsWith(tempHome.toPath())
+				, "the streams dir must live under the temp dir, but is " + OmFileHelper.getStreamsDir());
 	}
 
 	@AfterEach
 	void tearDown() throws Exception {
-		if (WbRecordingManager.isRecording(ROOM_ID)) {
-			WbRecordingManager.stop(ROOM_ID);
+		try {
+			if (WbRecordingManager.isRecording(ROOM_ID)) {
+				WbRecordingManager.stop(ROOM_ID);
+			}
+			deleteRecursively(tempHome);
+		} finally {
+			ReflectionTestUtils.setField(OmFileHelper.class, "omHome", savedOmHome);
+			ReflectionTestUtils.setField(OmFileHelper.class, "dataHome", savedDataHome);
+			if (savedDataDirProperty == null) {
+				System.clearProperty("DATA_DIR");
+			} else {
+				System.setProperty("DATA_DIR", savedDataDirProperty);
+			}
 		}
-		deleteRecursively(tempHome);
 	}
 
 	private static void deleteRecursively(File f) {

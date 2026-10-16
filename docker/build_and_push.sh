@@ -23,6 +23,28 @@
 #                    MUTABLE, so tag distinctness is a naming discipline,
 #                    not something the registry enforces.
 #
+# ENVIRONMENT
+#   SKIP_FORK_TESTS  EMERGENCY OFF-SWITCH for the build's test gate. By default
+#                    the Dockerfile's builder stage runs the fork's own tests
+#                    (mvn -pl openmeetings-service test: TestSingleStreamConversion-
+#                    Submitter, TestWbRecordingManager) and a red test FAILS the
+#                    image build, so nothing is built or pushed. The gate also
+#                    FAILS the build if either of those two classes did not run,
+#                    executed zero tests, or had ANY test skipped (a class- or
+#                    method-level @Disabled, a failed assumption): a skipped
+#                    regression test protects nothing. Set to exactly 1
+#                    (SKIP_FORK_TESTS=1) to skip the gate; ANY other value
+#                    (empty, 0, false, a typo) leaves the gate ON. A skipped
+#                    build's image is tagged with a "-notests" suffix so it can
+#                    never be mistaken for a gated build. Do NOT use the
+#                    off-switch to get past a gate failure caused by a pruned
+#                    Maven cache (dependency-resolution or "cannot find symbol"
+#                    compile errors, not a test failure): re-run the install
+#                    step with `docker build --no-cache` instead -- this script
+#                    has no flag for that, so run its `docker build` line by
+#                    hand (see the "DEPENDENCY ON THE CACHE-MOUNTED ~/.m2" note
+#                    on the test gate in docker/Dockerfile).
+#
 # Must be run from a repo with a REAL .git directory (a plain `git clone`,
 # not a `git worktree`) -- buildnumber-maven-plugin shells out to `git log`
 # during the Maven build, and a worktree's .git is a text file pointing at
@@ -67,6 +89,23 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
+# --- 2b: the test-gate off-switch (emergency only) ---------------------------
+# ONLY the exact value 1 turns the gate off. Empty, 0, false, yes, a typo --
+# anything else leaves it ON, so a mistyped SKIP_FORK_TESTS=false can never
+# silently disable the gate (the Dockerfile applies the same exact-1 rule). A
+# value that is neither empty, 0 nor 1 is called out, since the operator
+# clearly meant something by it.
+SKIP_FORK_TESTS="${SKIP_FORK_TESTS:-}"
+if [[ "$SKIP_FORK_TESTS" == "1" ]]; then
+  echo "WARNING: SKIP_FORK_TESTS=1 -- the fork's own tests will NOT be run for this image." >&2
+  TAG_SUFFIX="${TAG_SUFFIX}-notests"
+else
+  if [[ -n "$SKIP_FORK_TESTS" && "$SKIP_FORK_TESTS" != "0" ]]; then
+    echo "NOTE: SKIP_FORK_TESTS='$SKIP_FORK_TESTS' ignored -- only the exact value 1 skips the test gate; it stays ON." >&2
+  fi
+  SKIP_FORK_TESTS=""
+fi
+
 BRANCH="$(git branch --show-current)"
 SHA="$(git rev-parse --short=9 HEAD)"
 TAG="full-replace-${SHA}${TAG_SUFFIX}"
@@ -75,7 +114,10 @@ IMAGE="${ECR_REPO}:${TAG}"
 echo "=== Building $IMAGE (branch $BRANCH, commit $(git rev-parse HEAD)) ==="
 
 # --- 3: build ----------------------------------------------------------------
-docker build -f docker/Dockerfile -t "$IMAGE" .
+# The Dockerfile's builder stage runs the fork's own tests (the "test gate")
+# right after the Maven install: a red test makes `docker build` fail here, and
+# `set -e` then aborts this script before verification or any push.
+docker build -f docker/Dockerfile --build-arg "SKIP_FORK_TESTS=$SKIP_FORK_TESTS" -t "$IMAGE" .
 
 # --- 4: basic post-build verification ---------------------------------------
 echo "=== Verifying image ==="

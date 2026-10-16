@@ -55,8 +55,11 @@ COPY . .
 #      per-stage `rm` below.
 RUN rm -rf docker
 # -PallModules matches this project's own documented build command (README.md).
-# The full test suite can still be run separately (mvn test) when actually
-# validating a patch, not on every rebuild.
+# The reactor-wide install below skips tests (-DskipTests): upstream's own
+# module test suites are heavy/DB-bound and are NOT run on every rebuild. The
+# fork's OWN tests (the ones guarding this fork's patches, all in
+# openmeetings-service) are run by the dedicated "test gate" step right after
+# the install -- see below.
 #
 # Cache-mount the local Maven repo -- without it, every rebuild (including one
 # that only changes a single Java file to test a patch) re-downloads this
@@ -70,6 +73,103 @@ RUN rm -rf docker
 # at runtime, and -DskipTests already means no test coverage is being
 # traded away here.
 RUN --mount=type=cache,target=/root/.m2 mvn -B clean install -PallModules -DskipTests -Dmaven.javadoc.skip=true
+
+# ---- Test gate: the fork's own tests must pass or the image is not built ----
+# Before this step existed the image build ran with -DskipTests only, so the
+# fork's regression tests (TestSingleStreamConversionSubmitter pins CONV-1,
+# the mkdirs() check-then-act race; TestWbRecordingManager pins the whiteboard
+# asset export) protected nothing unless someone happened to run Maven by hand.
+#
+# What it runs: the plain `test` phase of openmeetings-service -- no -Dtest
+# name list on purpose. The root pom's surefire config runs exactly the
+# classes named Test*, so this is "every test the project's own convention
+# says should run in that module", and a new Test* class is gated automatically
+# instead of silently falling out of a hard-coded list. (Do NOT name a test
+# class *Test: it will never run -- that is how WbRecordingManagerTest went
+# unrun for weeks.)
+#
+# -DfailIfNoTests=true: surefire 3.5.x otherwise exits 0 / BUILD SUCCESS when
+# it finds ZERO tests (verified by running it), so a module whose test classes
+# were all deleted or renamed away from Test* would "pass" while protecting
+# nothing. With the flag the same run fails with "No tests were executed!".
+#
+# The per-class pin after mvn: that flag only guards against zero tests in the
+# whole module. With two fork test classes, renaming just ONE of them back to
+# *Test would still leave the other running, so BUILD SUCCESS -- verified: this
+# is exactly how WbRecordingManagerTest sat unrun. So the loop below also
+# demands a surefire report for each named class. (Reports can only come from
+# this step: the install above runs with -DskipTests, which writes none.) When
+# you add a fork test class, add its simple name to this list.
+#
+# Executed-and-not-skipped, not just "a report exists": surefire also writes a
+# report for a class whose tests were all SKIPPED -- a class-level @Disabled, or
+# an @EnabledOnOs / Assumption that does not hold in the builder's Linux-as-root
+# environment -- and the sibling class keeps the module-wide count above zero,
+# so neither -DfailIfNoTests nor the existence check would notice: the image
+# would build with CONV-1's regression test protecting nothing. So the loop also
+# reads the tests="N" and skipped="M" attributes from each pinned class's own
+# <testsuite> start tag and requires N >= 1 and M == 0. POSIX sh + tr + grep +
+# head + sed only: the builder image (maven:3-eclipse-temurin-21, Ubuntu, /bin/sh
+# = dash) has no python. The counts are read fail-CLOSED: an attribute that
+# cannot be parsed fails the build rather than passing it. (Failures and errors
+# need no check here -- they already make mvn itself exit non-zero.)
+#
+# The tag read is the FIRST "<testsuite " in the report -- the root element, which
+# surefire writes before any test output. NOT the last one: the report embeds each
+# test's stdout/stderr in a CDATA block, so a pinned test class that ever prints
+# text containing its own "<testsuite ... tests=N skipped=0>" (a logged XML
+# fragment, a report it parsed) would otherwise be read as if it were the root
+# tag and could mask a real skipped="4" (verified: the old greedy-.* extraction
+# printed "9 tests executed, 0 skipped" and exited 0 on exactly that input).
+# tr first joins the lines so a root tag wrapped over several lines still parses.
+#
+# DEPENDENCY ON THE CACHE-MOUNTED ~/.m2 -- deliberately no -am. `-pl
+# openmeetings-service` compiles only that one module and resolves its sibling
+# modules (openmeetings-util, -db, -core, ...) as jars from ~/.m2. Those must be
+# THIS FORK's jars, which only the install step above puts there (the cache
+# mount is a separate store from the layer cache). What a pruned cache looks
+# like -- verified by running this gate against a copy of ~/.m2 with the
+# openmeetings-* entries deleted -- is a LOUD, early failure, never a false
+# green: if everything is gone Maven stops at "Could not resolve dependencies
+# for project ...openmeetings-service ... openmeetings-core:jar:9.1.0" (upstream
+# never published that module to Central); if only util/db are gone Maven fetches
+# the UPSTREAM 9.1.0 jars of those two from Central, which lack the fork-only
+# symbols, and the build stops with COMPILE errors in openmeetings-service's own
+# main sources -- "cannot find symbol ... markWorldReadable ... location: class
+# OmFileHelper", plus an "incompatible types" error from the ProcessHelper.exec
+# overload the fork added. Either way the fix is to rebuild the install step
+# above (docker build --no-cache) -- NOT to reach for SKIP_FORK_TESTS=1.
+#
+# ~10 tests, well under a minute once the surefire provider is cached.
+#
+# EMERGENCY OFF-SWITCH: --build-arg SKIP_FORK_TESTS=1 (build_and_push.sh
+# forwards the SKIP_FORK_TESTS env var, and tags such an image "-notests").
+# ONLY the exact value 1 skips the gate; empty, 0, false, or anything else
+# leaves it ON, so a mistyped "SKIP_FORK_TESTS=false" can never silently
+# disable it. Declared HERE, not at the top, so that toggling it invalidates
+# only this step's cache and never the expensive install above.
+ARG SKIP_FORK_TESTS=""
+RUN --mount=type=cache,target=/root/.m2 \
+    if [ "${SKIP_FORK_TESTS}" = "1" ]; then \
+        echo "WARNING: SKIP_FORK_TESTS=1 -- the fork's own tests were NOT run for this image"; \
+    else \
+        mvn -B -pl openmeetings-service test -DfailIfNoTests=true \
+        && for t in TestSingleStreamConversionSubmitter TestWbRecordingManager; do \
+            rep=$(ls openmeetings-service/target/surefire-reports/TEST-*."${t}".xml 2>/dev/null | head -n 1); \
+            [ -n "${rep}" ] \
+            || { echo "ERROR: test gate: ${t} did not run (class renamed away from Test*, or moved out of openmeetings-service?)"; exit 1; }; \
+            suite=$(tr '\n' ' ' < "${rep}" | grep -o '<testsuite [^>]*>' | head -n 1); \
+            tests=$(printf '%s' "${suite}" | sed -n 's/.* tests="\([0-9][0-9]*\)".*/\1/p'); \
+            skipped=$(printf '%s' "${suite}" | sed -n 's/.* skipped="\([0-9][0-9]*\)".*/\1/p'); \
+            { [ -n "${tests}" ] && [ -n "${skipped}" ]; } \
+            || { echo "ERROR: test gate: could not read the tests/skipped counts of ${t} from ${rep} (surefire report format changed?)"; exit 1; }; \
+            [ "${tests}" -ge 1 ] \
+            || { echo "ERROR: test gate: ${t} executed no tests (tests=${tests} in ${rep})"; exit 1; }; \
+            [ "${skipped}" -eq 0 ] \
+            || { echo "ERROR: test gate: ${t} had ${skipped} of ${tests} tests SKIPPED (class- or method-level @Disabled, or an assumption that does not hold in this build environment?) -- a skipped test protects nothing"; exit 1; }; \
+            echo "test gate: ${t}: ${tests} tests executed, ${skipped} skipped"; \
+        done; \
+    fi
 
 # ---- Runtime stage (verbatim structure from openmeetings/openmeetings-docker@9.1.1) ----
 FROM ubuntu:24.04
