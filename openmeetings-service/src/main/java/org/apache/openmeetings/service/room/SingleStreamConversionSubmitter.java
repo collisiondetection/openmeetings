@@ -97,6 +97,27 @@ public class SingleStreamConversionSubmitter {
 	}
 
 	/**
+	 * Creates {@code outDir} (and any missing parents) without racing against
+	 * other threads doing the same thing -- see the comment in
+	 * {@link #convert(Long, String)} for the real failure this guards against.
+	 *
+	 * @param outDir the single-stream output directory to create
+	 * @return {@code true} if the directory exists when this returns (whether
+	 *         this call or a concurrent one created it), {@code false} if it
+	 *         could not be created or the path exists as a non-directory
+	 *         (logged at error level)
+	 */
+	static boolean ensureOutputDir(File outDir) {
+		try {
+			Files.createDirectories(outDir.toPath());
+			return true;
+		} catch (IOException e) {
+			log.error("Could not create single-stream output dir {}", outDir, e);
+			return false;
+		}
+	}
+
+	/**
 	 * @param roomId room the recording was made in
 	 * @param requestId the id {@link org.apache.openmeetings.db.manager.ISingleStreamRecordingManager#startSingle}
 	 *                  returned, and the raw chunk is named after
@@ -125,11 +146,10 @@ public class SingleStreamConversionSubmitter {
 		// a conversion failure even though the winner's own conversion (into
 		// this same directory) succeeded. createDirectories() is race-free by
 		// contract -- it only throws if creation genuinely fails or the path
-		// already exists as a non-directory.
-		try {
-			Files.createDirectories(outDir.toPath());
-		} catch (IOException e) {
-			log.error("Could not create single-stream output dir {}", outDir, e);
+		// already exists as a non-directory. Extracted into ensureOutputDir()
+		// purely so that guarantee can be pinned by a unit test (convert()
+		// itself needs Spring, a real chunk, ffmpeg and the Batch shim).
+		if (!ensureOutputDir(outDir)) {
 			return null;
 		}
 		// This mp4 is read by a DIFFERENT process (Moodle, in a different
